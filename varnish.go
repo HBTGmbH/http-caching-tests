@@ -14,6 +14,15 @@ import (
 
 var cli *client.Client
 
+const varnishImage = "varnish:7.4.1-alpine"
+
+type VarnishConfig struct {
+	BackendPort  string
+	Vcl          string
+	DefaultTtl   string
+	DefaultGrace string
+}
+
 func init() {
 	var err error
 	// create a Docker client
@@ -21,7 +30,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	reader, err := cli.ImagePull(context.Background(), "varnish:7.4.1-alpine", types.ImagePullOptions{})
+	reader, err := cli.ImagePull(context.Background(), varnishImage, types.ImagePullOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -29,7 +38,7 @@ func init() {
 	io.Copy(os.Stdout, reader)
 }
 
-func StartVarnishInDocker(backendPort, vcl, defaultTtl, defaultGrace string) (int, func(), error) {
+func StartVarnishInDocker(config VarnishConfig) (int, func(), error) {
 	// write vcl as default.vcl file in a temporary directory
 	tmpDir, err := os.MkdirTemp("", "varnish")
 	if err != nil {
@@ -41,16 +50,16 @@ func StartVarnishInDocker(backendPort, vcl, defaultTtl, defaultGrace string) (in
 	err = os.WriteFile(vclFileName, []byte(`vcl 4.1;
 backend default {
 	.host = "host.docker.internal";
-	.port = "`+backendPort+`";
+	.port = "`+config.BackendPort+`";
 }
-`+vcl), 0644)
+`+config.Vcl), 0644)
 	if err != nil {
 		return 0, nil, err
 	}
 
 	// create a Varnish container
 	containerResponse, err := cli.ContainerCreate(context.Background(), &container.Config{
-		Image: "varnish:7.4.1-alpine",
+		Image: varnishImage,
 		ExposedPorts: nat.PortSet{
 			"8080/tcp": struct{}{},
 		},
@@ -58,9 +67,9 @@ backend default {
 			"-n",
 			"/tmp/varnish_workdir",
 			"-t",
-			defaultTtl,
+			withDefault(config.DefaultTtl, "0s"),
 			"-p",
-			"default_grace=" + defaultGrace,
+			"default_grace=" + withDefault(config.DefaultGrace, "0s"),
 		},
 		Env: []string{
 			"VARNISH_HTTP_PORT=8080",
@@ -110,4 +119,11 @@ backend default {
 	return varnishPortAsInt, func() {
 		err = cli.ContainerStop(context.Background(), containerResponse.ID, container.StopOptions{})
 	}, nil
+}
+
+func withDefault(s string, defaultValue string) string {
+	if s == "" {
+		return defaultValue
+	}
+	return s
 }

@@ -27,7 +27,10 @@ func TestNoCacheControl(t *testing.T) {
 	defer testServer.Close()
 
 	// start varnish container
-	port, stopFunc, err := caching.StartVarnishInDocker(testServerPort, "", "1s", "0s")
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+	})
 	require.NoError(t, err)
 	defer stopFunc()
 
@@ -73,7 +76,9 @@ func TestCacheControlNoCache(t *testing.T) {
 	defer testServer.Close()
 
 	// start varnish container
-	port, stopFunc, err := caching.StartVarnishInDocker(testServerPort, "", "0s", "0s")
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+	})
 	require.NoError(t, err)
 	defer stopFunc()
 
@@ -103,7 +108,9 @@ func TestCacheControlMaxAge1(t *testing.T) {
 	defer testServer.Close()
 
 	// start varnish container
-	port, stopFunc, err := caching.StartVarnishInDocker(testServerPort, "", "0s", "0s")
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+	})
 	require.NoError(t, err)
 	defer stopFunc()
 
@@ -138,7 +145,9 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	defer testServer.Close()
 
 	// start varnish container
-	port, stopFunc, err := caching.StartVarnishInDocker(testServerPort, "", "0s", "0s")
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+	})
 	require.NoError(t, err)
 	defer stopFunc()
 
