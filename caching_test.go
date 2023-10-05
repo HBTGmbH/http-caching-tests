@@ -5,6 +5,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -18,7 +19,7 @@ func TestNoCacheControl(t *testing.T) {
 	var backendRequests int
 
 	// start a test server
-	testServerPort, testServer := caching.StartTestServer(func(w http.ResponseWriter, r *http.Request) {
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Response", r.Header.Get("X-Request"))
 		w.WriteHeader(http.StatusOK)
 		backendRequests++
@@ -32,6 +33,7 @@ func TestNoCacheControl(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer stopFunc()
+	waitForHealthy(t, port)
 
 	// send request
 	assert.Equal(t, "foo", req(t, port, "foo"))
@@ -66,7 +68,7 @@ func TestCacheControlNoCache(t *testing.T) {
 	var backendRequests int
 
 	// start a test server
-	testServerPort, testServer := caching.StartTestServer(func(w http.ResponseWriter, r *http.Request) {
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("X-Response", r.Header.Get("X-Request"))
 		w.WriteHeader(http.StatusOK)
@@ -80,6 +82,7 @@ func TestCacheControlNoCache(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer stopFunc()
+	waitForHealthy(t, port)
 
 	// send request
 	assert.Equal(t, "foo", req(t, port, "foo"))
@@ -98,7 +101,7 @@ func TestCacheControlMaxAge1(t *testing.T) {
 	var backendRequests int
 
 	// start a test server
-	testServerPort, testServer := caching.StartTestServer(func(w http.ResponseWriter, r *http.Request) {
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=1")
 		w.Header().Set("X-Response", r.Header.Get("X-Request"))
 		w.WriteHeader(http.StatusOK)
@@ -112,6 +115,7 @@ func TestCacheControlMaxAge1(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer stopFunc()
+	waitForHealthy(t, port)
 
 	// send request to varnish
 	assert.Equal(t, "1", req(t, port, "1"))
@@ -131,7 +135,7 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	var backendRequests int
 
 	// start a test server
-	testServerPort, testServer := caching.StartTestServer(func(w http.ResponseWriter, r *http.Request) {
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
 		xRequest := r.Header.Get("X-Request")
 		if xRequest == "2" {
 			time.Sleep(2000 * time.Millisecond)
@@ -149,6 +153,7 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer stopFunc()
+	waitForHealthy(t, port)
 
 	// send request to varnish
 	assert.Equal(t, "1", req(t, port, "1"))
@@ -175,17 +180,18 @@ func TestStaleWhileRevalidate(t *testing.T) {
 
 // TestHitForMissAndNoRequestCoalescingWhenNoStore tests that Varnish will not serialize multiple requests when
 // the first response marks the response as uncacheable due to "Cache-Control: no-store".
-// This is tested by sending 10 requests in parallel, where the first request will take about 1 second to
-// respond, and the remaining 9 requests will then respond in parallel because Varnish will
+// This is tested by sending N requests in parallel, where the first request will take about 1 second to
+// respond, and the remaining N-1 requests will then respond in parallel because Varnish will
 // create a "hit-for-miss" cache item and store that for 120s by default.
 // See: https://github.com/varnishcache/varnish-cache/blob/master/bin/varnishd/builtin.vcl#L248-L252
 func TestHitForMissAndNoRequestCoalescingWhenNoStore(t *testing.T) {
 	t.Parallel()
 	var backendRequests int
+	sleepTime := 1 * time.Second
 
 	// start a test server
-	testServerPort, testServer := caching.StartTestServer(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(1 * time.Second)
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(sleepTime)
 
 		// The below will trigger Varnish's vcl_beresp_hitmiss logic
 		// see: https://github.com/varnishcache/varnish-cache/blob/master/bin/varnishd/builtin.vcl#L248-L252
@@ -203,6 +209,7 @@ func TestHitForMissAndNoRequestCoalescingWhenNoStore(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer stopFunc()
+	waitForHealthy(t, port)
 
 	const N = 10
 
@@ -212,18 +219,20 @@ func TestHitForMissAndNoRequestCoalescingWhenNoStore(t *testing.T) {
 		go func() { ch <- req(t, port, "1") }()
 	}
 
-	// expect 10 responses, but NOT serialized!
+	// expect N responses, but NOT all of them serialized!
 	time1 := time.Now()
 	for i := 0; i < N; i++ {
 		assert.Equal(t, "1", <-ch)
 	}
 	time2 := time.Now()
 
-	// expect the responses to have come back in parallel
-	// (i.e. not serialized). We just use some safe value
-	// here to account for slow/errored/retried initial
-	// requests due to Varnish not being up and running.
-	assert.Less(t, time2.Sub(time1), 4*time.Second)
+	// expect all but the first response to have come back in parallel.
+	// What will happen is: The first request will take sleepTime to respond,
+	// then Varnish will create the hit-for-miss cache item and start off
+	// the following N-1 requests in parallel, which will all take sleepTime
+	// together to respond.
+	// Therefore, the whole test case is completed after about 2 * sleepTime.
+	assert.Less(t, time2.Sub(time1), sleepTime+sleepTime+100*time.Millisecond)
 
 	// expect N backend requests
 	assert.Equal(t, N, backendRequests)
@@ -236,17 +245,32 @@ func req(t *testing.T, port, xRequestHeader string) string {
 	req, err := http.NewRequest("GET", "http://localhost:"+port+"/", nil)
 	req.Header.Set("X-Request", xRequestHeader)
 	assert.NoError(t, err)
-	resp, err := doRequestWithRetry(httpClient, req, 10)
+	resp, err := httpClient.Do(req)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	return resp.Header.Get("X-Response")
 }
 
-func doRequestWithRetry(httpClient http.Client, req *http.Request, retries int) (*http.Response, error) {
-	resp, err := httpClient.Do(req)
-	if err != nil && retries > 0 {
+func startTestServer(handler http.HandlerFunc) (string, *httptest.Server) {
+	return caching.StartTestServer(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		handler(w, r)
+	})
+}
+
+func waitForHealthy(t *testing.T, port string) {
+	httpClient := http.Client{}
+	for i := 0; i < 10; i++ {
+		req, err := http.NewRequest("GET", "http://localhost:"+port+"/health", nil)
+		require.NoError(t, err)
+		resp, err := httpClient.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return
+		}
 		time.Sleep(100 * time.Millisecond)
-		return doRequestWithRetry(httpClient, req, retries-1)
 	}
-	return resp, nil
 }
