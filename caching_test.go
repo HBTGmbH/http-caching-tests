@@ -5,7 +5,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"net/http"
-	"strconv"
 	"testing"
 	"time"
 )
@@ -176,9 +175,9 @@ func TestStaleWhileRevalidate(t *testing.T) {
 
 // ################ Test fixtures and helpers ################
 
-func req(t *testing.T, port int, xRequestHeader string) string {
+func req(t *testing.T, port, xRequestHeader string) string {
 	httpClient := http.Client{}
-	req, err := http.NewRequest("GET", "http://localhost:"+strconv.Itoa(port)+"/", nil)
+	req, err := http.NewRequest("GET", "http://localhost:"+port+"/", nil)
 	req.Header.Set("X-Request", xRequestHeader)
 	assert.NoError(t, err)
 	resp, err := doRequestWithRetry(httpClient, req, 10)

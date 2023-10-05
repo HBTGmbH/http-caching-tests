@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"strconv"
 )
 
 var cli *client.Client
@@ -38,11 +37,11 @@ func init() {
 	io.Copy(os.Stdout, reader)
 }
 
-func StartVarnishInDocker(config VarnishConfig) (int, func(), error) {
+func StartVarnishInDocker(config VarnishConfig) (string, func(), error) {
 	// write vcl as default.vcl file in a temporary directory
 	tmpDir, err := os.MkdirTemp("", "varnish")
 	if err != nil {
-		return 0, nil, err
+		return "", nil, err
 	}
 	defer os.RemoveAll(tmpDir)
 
@@ -54,7 +53,7 @@ backend default {
 }
 `+config.Vcl), 0644)
 	if err != nil {
-		return 0, nil, err
+		return "", nil, err
 	}
 
 	// create a Varnish container
@@ -95,28 +94,24 @@ backend default {
 		},
 	}, nil, nil, "")
 	if err != nil {
-		return 0, nil, err
+		return "", nil, err
 	}
 
 	// start the container
 	err = cli.ContainerStart(context.Background(), containerResponse.ID, types.ContainerStartOptions{})
 	if err != nil {
-		return 0, nil, err
+		return "", nil, err
 	}
 
 	// figure out the allocated port
 	containerInspect, err := cli.ContainerInspect(context.Background(), containerResponse.ID)
 	if err != nil {
-		return 0, nil, err
+		return "", nil, err
 	}
 	varnishPort := containerInspect.NetworkSettings.Ports["8080/tcp"][0].HostPort
-	varnishPortAsInt, err := strconv.Atoi(varnishPort)
-	if err != nil {
-		return 0, nil, err
-	}
 
 	// return a function that will stop the container
-	return varnishPortAsInt, func() {
+	return varnishPort, func() {
 		err = cli.ContainerStop(context.Background(), containerResponse.ID, container.StopOptions{})
 	}, nil
 }
