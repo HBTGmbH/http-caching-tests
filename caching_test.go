@@ -173,6 +173,62 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	assert.Equal(t, 2, backendRequests)
 }
 
+// TestHitForMissAndNoRequestCoalescingWhenNoStore tests that Varnish will not serialize multiple requests when
+// the first response marks the response as uncacheable due to "Cache-Control: no-store".
+// This is tested by sending 10 requests in parallel, where the first request will take about 1 second to
+// respond, and the remaining 9 requests will then respond in parallel because Varnish will
+// create a "hit-for-miss" cache item and store that for 120s by default.
+// See: https://github.com/varnishcache/varnish-cache/blob/master/bin/varnishd/builtin.vcl#L248-L252
+func TestHitForMissAndNoRequestCoalescingWhenNoStore(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := caching.StartTestServer(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1 * time.Second)
+
+		// The below will trigger Varnish's vcl_beresp_hitmiss logic
+		// see: https://github.com/varnishcache/varnish-cache/blob/master/bin/varnishd/builtin.vcl#L248-L252
+		w.Header().Set("Cache-Control", "no-store")
+
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+
+	const N = 10
+
+	// send N requests in parallel
+	ch := make(chan string, N)
+	for i := 0; i < N; i++ {
+		go func() { ch <- req(t, port, "1") }()
+	}
+
+	// expect 10 responses, but NOT serialized!
+	time1 := time.Now()
+	for i := 0; i < N; i++ {
+		assert.Equal(t, "1", <-ch)
+	}
+	time2 := time.Now()
+
+	// expect the responses to have come back in parallel
+	// (i.e. not serialized). We just use some safe value
+	// here to account for slow/errored/retried initial
+	// requests due to Varnish not being up and running.
+	assert.Less(t, time2.Sub(time1), 4*time.Second)
+
+	// expect N backend requests
+	assert.Equal(t, N, backendRequests)
+}
+
 // ################ Test fixtures and helpers ################
 
 func req(t *testing.T, port, xRequestHeader string) string {
