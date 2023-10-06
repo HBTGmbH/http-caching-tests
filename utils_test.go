@@ -5,6 +5,7 @@ import (
 	"caching"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 type response struct {
 	statusCode int
 	xResponse  string
+	body       string
 }
 
 func resp(statusCode int, xResponse string) response {
@@ -24,27 +26,43 @@ func resp(statusCode int, xResponse string) response {
 	}
 }
 
+func respB(statusCode int, xResponse, body string) response {
+	return response{
+		statusCode: statusCode,
+		xResponse:  xResponse,
+		body:       body,
+	}
+}
+
 func reqR(t *testing.T, port, xRequest string) response {
-	return reqSRAC(t, port, http.StatusOK, xRequest, "", "")
+	return reqSRAC(t, port, http.StatusOK, xRequest, "", "", false)
+}
+
+func reqR_B(t *testing.T, port, xRequest string) response {
+	return reqSRAC(t, port, http.StatusOK, xRequest, "", "", true)
 }
 
 func reqRA(t *testing.T, port, xRequest, authorization string) response {
-	return reqSRAC(t, port, http.StatusOK, xRequest, authorization, "")
+	return reqSRAC(t, port, http.StatusOK, xRequest, authorization, "", false)
 }
 
 func reqRC(t *testing.T, port, xRequest, cookie string) response {
-	return reqSRAC(t, port, http.StatusOK, xRequest, "", cookie)
+	return reqSRAC(t, port, http.StatusOK, xRequest, "", cookie, false)
 }
 
 func reqSR(t *testing.T, port string, status int, xRequest string) response {
-	return reqSRAC(t, port, status, xRequest, "", "")
+	return reqSRAC(t, port, status, xRequest, "", "", false)
 }
 
-func reqSRAC(t *testing.T, port string, status int, xRequest, authorization, cookie string) response {
+func reqSRAC(t *testing.T, port string, status int, xRequest, authorization, cookie string, storeBody bool) response {
 	httpClient := http.Client{}
 	req, err := http.NewRequest("GET", "http://localhost:"+port+"/", nil)
-	req.Header.Set("X-Status-Code", strconv.Itoa(status))
-	req.Header.Set("X-Request", xRequest)
+	if status != 0 {
+		req.Header.Set("X-Status-Code", strconv.Itoa(status))
+	}
+	if xRequest != "" {
+		req.Header.Set("X-Request", xRequest)
+	}
 	if authorization != "" {
 		req.Header.Set("Authorization", authorization)
 	}
@@ -54,10 +72,21 @@ func reqSRAC(t *testing.T, port string, status int, xRequest, authorization, coo
 	assert.NoError(t, err)
 	resp, err := httpClient.Do(req)
 	assert.NoError(t, err)
+	body := ""
+	if storeBody {
+		body = readBody(t, resp)
+	}
 	return response{
 		statusCode: resp.StatusCode,
 		xResponse:  resp.Header.Get("X-Response"),
+		body:       body,
 	}
+}
+
+func readBody(t *testing.T, resp *http.Response) string {
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	return string(body)
 }
 
 func startTestServer(handler http.HandlerFunc) (string, *httptest.Server) {

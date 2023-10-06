@@ -20,6 +20,7 @@ type VarnishConfig struct {
 	Vcl          string
 	DefaultTtl   string
 	DefaultGrace string
+	DefaultKeep  string
 }
 
 func init() {
@@ -69,6 +70,8 @@ backend default {
 			withDefault(config.DefaultTtl, "0s"),
 			"-p",
 			"default_grace=" + withDefault(config.DefaultGrace, "0s"),
+			"-p",
+			"default_keep=" + withDefault(config.DefaultKeep, "0s"),
 		},
 		Env: []string{
 			"VARNISH_HTTP_PORT=8080",
