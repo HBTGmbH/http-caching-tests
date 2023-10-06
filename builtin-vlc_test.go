@@ -374,3 +374,89 @@ func TestHitForMissAndNoRequestCoalescingWhenNoStore(t *testing.T) {
 	// expect N backend requests
 	assert.Equal(t, N, backendRequests)
 }
+
+// TestNoCachingWhenRequestHasAuthorizationHeader tests that Varnish will not cache a response
+// when the request has an "Authorization" header.
+func TestNoCachingWhenRequestHasAuthorizationHeader(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		// test for the Authorization header to have the correct value
+		xRequest := r.Header.Get("X-Request")
+		if xRequest == "foo" {
+			assert.Equal(t, "Test 12345", r.Header.Get("Authorization"))
+		} else if xRequest == "bar" {
+			assert.Equal(t, "Test 67890", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request with Authorization header
+	assert.Equal(t, "foo", reqRA(t, port, "foo", "Test 12345").xResponse)
+
+	// wait a bit
+	time.Sleep(50 * time.Millisecond)
+
+	// send another request and expect uncached response
+	assert.Equal(t, "bar", reqRA(t, port, "bar", "Test 67890").xResponse)
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
+
+// TestNoCachingWhenRequestHasCookieHeader tests that Varnish will not cache a response
+// when the request has an "Cookie" header.
+func TestNoCachingWhenRequestHasCookieHeader(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		// test for the Authorization header to have the correct value
+		xRequest := r.Header.Get("X-Request")
+		if xRequest == "foo" {
+			assert.Equal(t, "test=12345", r.Header.Get("Cookie"))
+		} else if xRequest == "bar" {
+			assert.Equal(t, "test=67890", r.Header.Get("Cookie"))
+		}
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request with Authorization header
+	assert.Equal(t, "foo", reqRC(t, port, "foo", "test=12345").xResponse)
+
+	// wait a bit
+	time.Sleep(50 * time.Millisecond)
+
+	// send another request and expect uncached response
+	assert.Equal(t, "bar", reqRC(t, port, "bar", "test=67890").xResponse)
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}

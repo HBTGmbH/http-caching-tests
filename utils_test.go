@@ -24,15 +24,33 @@ func resp(statusCode int, xResponse string) response {
 	}
 }
 
-func reqR(t *testing.T, port string, xRequest string) response {
-	return reqSR(t, port, http.StatusOK, xRequest)
+func reqR(t *testing.T, port, xRequest string) response {
+	return reqSRAC(t, port, http.StatusOK, xRequest, "", "")
+}
+
+func reqRA(t *testing.T, port, xRequest, authorization string) response {
+	return reqSRAC(t, port, http.StatusOK, xRequest, authorization, "")
+}
+
+func reqRC(t *testing.T, port, xRequest, cookie string) response {
+	return reqSRAC(t, port, http.StatusOK, xRequest, "", cookie)
 }
 
 func reqSR(t *testing.T, port string, status int, xRequest string) response {
+	return reqSRAC(t, port, status, xRequest, "", "")
+}
+
+func reqSRAC(t *testing.T, port string, status int, xRequest, authorization, cookie string) response {
 	httpClient := http.Client{}
 	req, err := http.NewRequest("GET", "http://localhost:"+port+"/", nil)
 	req.Header.Set("X-Status-Code", strconv.Itoa(status))
 	req.Header.Set("X-Request", xRequest)
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
 	assert.NoError(t, err)
 	resp, err := httpClient.Do(req)
 	assert.NoError(t, err)
