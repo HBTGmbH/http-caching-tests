@@ -1,3 +1,4 @@
+// Contains tests for default behaviour using Varnish's built-in VCL implementation
 package caching_test
 
 import (
@@ -5,7 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
@@ -172,7 +172,7 @@ func TestNoCachingOf500ErrorInGracePeriodAfter200Request(t *testing.T) {
 	// wait a bit for Varnish to revalidate the cached response. After this, Varnish will have
 	// abandoned the cached 200 response and will also not have cached the 500 response resulting
 	// in subsequent requests to always hit the backend.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// send another request which will result in a backend fetch returning 500.
 	assert.Equal(t, resp(http.StatusInternalServerError, "3"), reqSR(t, port, http.StatusInternalServerError, "3"))
@@ -373,60 +373,4 @@ func TestHitForMissAndNoRequestCoalescingWhenNoStore(t *testing.T) {
 
 	// expect N backend requests
 	assert.Equal(t, N, backendRequests)
-}
-
-// ################ Test fixtures and helpers ################
-
-type response struct {
-	statusCode int
-	xResponse  string
-}
-
-func resp(statusCode int, xResponse string) response {
-	return response{
-		statusCode: statusCode,
-		xResponse:  xResponse,
-	}
-}
-
-func reqR(t *testing.T, port string, xRequest string) response {
-	return reqSR(t, port, http.StatusOK, xRequest)
-}
-
-func reqSR(t *testing.T, port string, status int, xRequest string) response {
-	httpClient := http.Client{}
-	req, err := http.NewRequest("GET", "http://localhost:"+port+"/", nil)
-	req.Header.Set("X-Status-Code", strconv.Itoa(status))
-	req.Header.Set("X-Request", xRequest)
-	assert.NoError(t, err)
-	resp, err := httpClient.Do(req)
-	assert.NoError(t, err)
-	return response{
-		statusCode: resp.StatusCode,
-		xResponse:  resp.Header.Get("X-Response"),
-	}
-}
-
-func startTestServer(handler http.HandlerFunc) (string, *httptest.Server) {
-	return caching.StartTestServer(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
-			w.Header().Set("Cache-Control", "no-store")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		handler(w, r)
-	})
-}
-
-func waitForHealthy(t *testing.T, port string) {
-	httpClient := http.Client{}
-	for i := 0; i < 10; i++ {
-		req, err := http.NewRequest("GET", "http://localhost:"+port+"/health", nil)
-		require.NoError(t, err)
-		resp, err := httpClient.Do(req)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
 }
