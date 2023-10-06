@@ -674,3 +674,44 @@ func TestMaxAge0AndNoCacheInRequest(t *testing.T) {
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
 }
+
+// TestClientConditionalRequest tests that Varnish will understand a client's conditional request
+// and will respond with a cached item (only headers) when the client sends an "If-None-Match"
+// that matches the cached item's Etag validator.
+func TestClientConditionalRequestWithEtag(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.Header().Set("Etag", "12345")
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte("foo"))
+		assert.NoError(t, err)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request
+	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+
+	// wait a bit
+	time.Sleep(100 * time.Millisecond)
+
+	// send another request with "If-None-Match: 12345" header and expect the previous cached return
+	// together with a 304 response code and no body.
+	assert.Equal(t, respB(http.StatusNotModified, "foo", ""), reqRINM(t, port, "bar", "12345"))
+
+	// expect one backend request
+	assert.Equal(t, 1, backendRequests)
+}

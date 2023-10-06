@@ -35,30 +35,34 @@ func respB(statusCode int, xResponse, body string) response {
 }
 
 func reqR(t *testing.T, port, xRequest string) response {
-	return reqSRCCAC(t, port, http.StatusOK, xRequest, "", "", "", false)
+	return req(t, port, http.StatusOK, xRequest, "", "", "", "", false)
 }
 
 func reqRCC(t *testing.T, port, xRequest, cacheControl string) response {
-	return reqSRCCAC(t, port, http.StatusOK, xRequest, cacheControl, "", "", false)
+	return req(t, port, http.StatusOK, xRequest, cacheControl, "", "", "", false)
 }
 
 func reqR_B(t *testing.T, port, xRequest string) response {
-	return reqSRCCAC(t, port, http.StatusOK, xRequest, "", "", "", true)
+	return req(t, port, http.StatusOK, xRequest, "", "", "", "", true)
 }
 
 func reqRA(t *testing.T, port, xRequest, authorization string) response {
-	return reqSRCCAC(t, port, http.StatusOK, xRequest, "", authorization, "", false)
+	return req(t, port, http.StatusOK, xRequest, "", authorization, "", "", false)
 }
 
 func reqRC(t *testing.T, port, xRequest, cookie string) response {
-	return reqSRCCAC(t, port, http.StatusOK, xRequest, "", "", cookie, false)
+	return req(t, port, http.StatusOK, xRequest, "", "", cookie, "", false)
 }
 
 func reqSR(t *testing.T, port string, status int, xRequest string) response {
-	return reqSRCCAC(t, port, status, xRequest, "", "", "", false)
+	return req(t, port, status, xRequest, "", "", "", "", false)
 }
 
-func reqSRCCAC(t *testing.T, port string, status int, xRequest, cacheControl, authorization, cookie string, storeBody bool) response {
+func reqRINM(t *testing.T, port, xRequest, ifNoneMatch string) response {
+	return req(t, port, http.StatusOK, xRequest, "", "", "", ifNoneMatch, true)
+}
+
+func req(t *testing.T, port string, status int, xRequest, cacheControl, authorization, cookie, ifNoneMatch string, storeBody bool) response {
 	httpClient := http.Client{}
 	req, err := http.NewRequest("GET", "http://localhost:"+port+"/", nil)
 	if status != 0 {
@@ -75,6 +79,9 @@ func reqSRCCAC(t *testing.T, port string, status int, xRequest, cacheControl, au
 	}
 	if cacheControl != "" {
 		req.Header.Set("Cache-Control", cacheControl)
+	}
+	if ifNoneMatch != "" {
+		req.Header.Set("If-None-Match", ifNoneMatch)
 	}
 	assert.NoError(t, err)
 	resp, err := httpClient.Do(req)
