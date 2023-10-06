@@ -56,6 +56,44 @@ func TestNoCacheControl(t *testing.T) {
 	assert.Equal(t, 2, backendRequests)
 }
 
+// TestCachingOf404 tests that Varnish will cache a 404 response from the backend by default.
+// For simplicity, we will use the default TTL without Cache-Control header.
+func TestCachingOf404(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		xStatusCode, err := strconv.Atoi(r.Header.Get("X-Status-Code"))
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		assert.NoError(t, err)
+		w.WriteHeader(xStatusCode)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request and expect the backend to respond with 404
+	assert.Equal(t, resp(http.StatusNotFound, "foo"), reqSR(t, port, http.StatusNotFound, "foo"))
+
+	// wait half a second
+	time.Sleep(500 * time.Millisecond)
+
+	// send another request which the backend would respond with 200 but expect the previous cached 404 response
+	assert.Equal(t, resp(http.StatusNotFound, "foo"), reqSR(t, port, http.StatusOK, "bar"))
+
+	// expect one backend request
+	assert.Equal(t, 1, backendRequests)
+}
+
 // TestNoCachingOf500ErrorOnFirstRequest tests that Varnish will not cache an initial 500 error
 // response from the backend when Varnish did not yet have a non 5xx response in its cache.
 // The scenario here is: Varnish starts up and the backend responds with 500. In that case, Varnish
@@ -143,7 +181,7 @@ func TestNoCachingOf500ErrorInGracePeriodAfter200Request(t *testing.T) {
 	// indicating that the previous response has not been cached.
 	assert.Equal(t, resp(http.StatusInternalServerError, "4"), reqSR(t, port, http.StatusInternalServerError, "4"))
 
-	// expect three backend requests
+	// expect four backend requests
 	assert.Equal(t, 4, backendRequests)
 }
 
