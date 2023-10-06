@@ -59,13 +59,13 @@ sub vcl_backend_response {
 	// wait for 600 ms to let the cached response expire and enter grace period
 	time.Sleep(600 * time.Millisecond)
 
-	// send a request which will trigger a background/asynchronous revalication
+	// send a request which will trigger a background/asynchronous revalidation
 	// request and result in a 500 response. We still get the 200 cached response here.
 	assert.Equal(t, resp(http.StatusOK, "foo"), reqSR(t, port, http.StatusInternalServerError, "baz"))
 
 	// wait a bit for Varnish to finish the revalidation request. Normally, if we hadn't
 	// modified vcl_backend_response, this would now abandon the 200 cached response and
-	// later requsts with a 500 response would also return 500.
+	// later requests with a 500 response would also return 500.
 	// But not this time. See next request.
 	time.Sleep(50 * time.Millisecond)
 

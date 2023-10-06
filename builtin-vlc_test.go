@@ -134,6 +134,8 @@ func TestNoCachingOf500ErrorOnFirstRequest(t *testing.T) {
 	assert.Equal(t, 2, backendRequests)
 }
 
+// TestNoCachingOf500ErrorInGracePeriodAfter200Request tests that Varnish will not cache a 500 error
+// response from the backend even if Varnish had a 200 response in its cache within the grace period.
 func TestNoCachingOf500ErrorInGracePeriodAfter200Request(t *testing.T) {
 	t.Parallel()
 	var backendRequests int
@@ -564,7 +566,7 @@ func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 }
 
 // TestConditionalRequestWhenRevalidatingWithLastModified tests that Varnish will perform a conditional request
-// when revalidating a cached response that had a Last-Modifiedvalidator and that Varnish is able to understand
+// when revalidating a cached response that had a Last-Modified validator and that Varnish is able to understand
 // a 304 response (without a body) while still retaining the body of the first cached response.
 func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	t.Parallel()
