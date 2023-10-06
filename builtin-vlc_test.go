@@ -460,3 +460,35 @@ func TestNoCachingWhenRequestHasCookieHeader(t *testing.T) {
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
 }
+
+// TestBackendRespondsWith304WhenUnconditionalRequest tests what Varnish will do
+// when the backend responds with 304 for an unconditional request, which is considered
+// illegal by the HTTP 1.1 spec.
+func TestBackendRespondsWith304WhenUnconditionalRequest(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotModified)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request which will be answered with 304 by the backend
+	// but Varnish will return 503 to the client, because the backend
+	// responding with a 304 for an unconditional request is an error.
+	assert.Equal(t, resp(http.StatusServiceUnavailable, ""), reqR(t, port, "foo"))
+
+	// expect one backend request
+	assert.Equal(t, 1, backendRequests)
+}
