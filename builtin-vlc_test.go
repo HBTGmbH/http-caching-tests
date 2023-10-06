@@ -493,10 +493,10 @@ func TestBackendRespondsWith304WhenUnconditionalRequest(t *testing.T) {
 	assert.Equal(t, 1, backendRequests)
 }
 
-// TestConditionalRequestWhenRevalidating tests that Varnish will perform a conditional request
-// when revalidating a cached response and that Varnish is able to understand a 304 response
+// TestConditionalRequestWhenRevalidatingWithEtag tests that Varnish will perform a conditional request
+// when revalidating a cached response that had an Etag validator and that Varnish is able to understand a 304 response
 // (without a body) while still retaining the body of the first cached response.
-func TestConditionalRequestWhenRevalidating(t *testing.T) {
+func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 	t.Parallel()
 	var backendRequests int
 
@@ -515,6 +515,78 @@ func TestConditionalRequestWhenRevalidating(t *testing.T) {
 			// the second request should be conditional and should include the If-None-Match header
 			// with the ETag value from the previous response
 			assert.Equal(t, "1234", r.Header.Get("If-None-Match"))
+			// here, we will respond with 304, which Varnish translates to 200 for the client
+			w.WriteHeader(http.StatusNotModified)
+		} else {
+			assert.Fail(t, "unexpected backend request")
+		}
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+		DefaultKeep: "5s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send the first request which will be answered with 200 by the backend
+	// and cached for 1 second. The response will have an Etag header to
+	// enable conditional revalidation later.
+	assert.Equal(t, respB(http.StatusOK, "1", "foo"), reqR_B(t, port, "1"))
+
+	// wait a bit for the response to become stale and enter the "keep" interval
+	// in which Varnish will still keep the cached object around but only for synchronous revalidation
+	time.Sleep(1100 * time.Millisecond)
+
+	// send the second request which will be answered with 304 by the backend
+	// and Varnish will respond with 200 to the client, still with the response body
+	// of the first response (which now became fresh again) and the headers of
+	// the revalidation request's response from the backend.
+	// Note that in this case we use "keep" instead of "grace" here to let Varnish
+	// revalidate synchronously.
+	assert.Equal(t, respB(http.StatusOK, "2", "foo"), reqR_B(t, port, "2"))
+
+	// wait a tiny bit to see if we have the response still cached
+	time.Sleep(200 * time.Millisecond)
+
+	// send the third request which will be answered directly from the cache
+	// because the once stale response became fresh again after the second request,
+	// which successfully revalidated the cached object.
+	assert.Equal(t, respB(http.StatusOK, "2", "foo"), reqR_B(t, port, "3"))
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
+
+// TestConditionalRequestWhenRevalidatingWithLastModified tests that Varnish will perform a conditional request
+// when revalidating a cached response that had a Last-Modifiedvalidator and that Varnish is able to understand
+// a 304 response (without a body) while still retaining the body of the first cached response.
+func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	lastModified := time.Now().UTC().Format(http.TimeFormat)
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.Header().Set("Last-Modified", lastModified)
+		if backendRequests == 0 {
+			// check that the first request won't be conditional
+			assert.Equal(t, "", r.Header.Get("If-Modified-Since"))
+			w.WriteHeader(http.StatusOK)
+			// and respond with a body
+			_, err := w.Write([]byte("foo"))
+			assert.NoError(t, err)
+		} else if backendRequests == 1 {
+			// the second request should be conditional and should include the If-Modified-Since header
+			// with the Last-Modified value from the previous response
+			assert.Equal(t, lastModified, r.Header.Get("If-Modified-Since"))
 			// here, we will respond with 304, which Varnish translates to 200 for the client
 			w.WriteHeader(http.StatusNotModified)
 		} else {
