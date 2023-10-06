@@ -35,26 +35,30 @@ func respB(statusCode int, xResponse, body string) response {
 }
 
 func reqR(t *testing.T, port, xRequest string) response {
-	return reqSRAC(t, port, http.StatusOK, xRequest, "", "", false)
+	return reqSRCCAC(t, port, http.StatusOK, xRequest, "", "", "", false)
+}
+
+func reqRCC(t *testing.T, port, xRequest, cacheControl string) response {
+	return reqSRCCAC(t, port, http.StatusOK, xRequest, cacheControl, "", "", false)
 }
 
 func reqR_B(t *testing.T, port, xRequest string) response {
-	return reqSRAC(t, port, http.StatusOK, xRequest, "", "", true)
+	return reqSRCCAC(t, port, http.StatusOK, xRequest, "", "", "", true)
 }
 
 func reqRA(t *testing.T, port, xRequest, authorization string) response {
-	return reqSRAC(t, port, http.StatusOK, xRequest, authorization, "", false)
+	return reqSRCCAC(t, port, http.StatusOK, xRequest, "", authorization, "", false)
 }
 
 func reqRC(t *testing.T, port, xRequest, cookie string) response {
-	return reqSRAC(t, port, http.StatusOK, xRequest, "", cookie, false)
+	return reqSRCCAC(t, port, http.StatusOK, xRequest, "", "", cookie, false)
 }
 
 func reqSR(t *testing.T, port string, status int, xRequest string) response {
-	return reqSRAC(t, port, status, xRequest, "", "", false)
+	return reqSRCCAC(t, port, status, xRequest, "", "", "", false)
 }
 
-func reqSRAC(t *testing.T, port string, status int, xRequest, authorization, cookie string, storeBody bool) response {
+func reqSRCCAC(t *testing.T, port string, status int, xRequest, cacheControl, authorization, cookie string, storeBody bool) response {
 	httpClient := http.Client{}
 	req, err := http.NewRequest("GET", "http://localhost:"+port+"/", nil)
 	if status != 0 {
@@ -68,6 +72,9 @@ func reqSRAC(t *testing.T, port string, status int, xRequest, authorization, coo
 	}
 	if cookie != "" {
 		req.Header.Set("Cookie", cookie)
+	}
+	if cacheControl != "" {
+		req.Header.Set("Cache-Control", cacheControl)
 	}
 	assert.NoError(t, err)
 	resp, err := httpClient.Do(req)

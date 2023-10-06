@@ -636,3 +636,41 @@ func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
 }
+
+// TestMaxAge0AndNoCacheInRequest tests that Varnish will simply ignore the "Cache-Control: max-age=0, no-cache"
+// header in the request and will not revalidate with the backend, by default.
+func TestMaxAge0AndNoCacheInRequest(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request
+	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+
+	// wait a bit
+	time.Sleep(100 * time.Millisecond)
+
+	// send another request with "Cache-Control: max-age=0, no-cache" and expect the previous cached return
+	// because by default Varnish cannot be forced to revalidate with the backend based on the client's
+	// request headers.
+	assert.Equal(t, "foo", reqRCC(t, port, "bar", "max-age=0, no-cache").xResponse)
+
+	// expect one backend request
+	assert.Equal(t, 1, backendRequests)
+}
