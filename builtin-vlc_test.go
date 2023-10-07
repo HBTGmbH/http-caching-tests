@@ -94,6 +94,41 @@ func TestCachingOf404(t *testing.T) {
 	assert.Equal(t, 1, backendRequests)
 }
 
+// TestNoCachingOfPost tests that Varnish will not cache a POST request by default.
+func TestNoCachingOfPost(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send a POST request (which should not get cached)
+	assert.Equal(t, resp(http.StatusOK, "foo"), reqMR(t, port, "POST", "foo"))
+
+	// wait half a second
+	time.Sleep(500 * time.Millisecond)
+
+	// send another request and expect an uncached response
+	assert.Equal(t, resp(http.StatusOK, "bar"), reqMR(t, port, "POST", "bar"))
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
+
 // TestNoCachingOf500ErrorOnFirstRequest tests that Varnish will not cache an initial 500 error
 // response from the backend when Varnish did not yet have a non 5xx response in its cache.
 // The scenario here is: Varnish starts up and the backend responds with 500. In that case, Varnish
@@ -675,7 +710,7 @@ func TestMaxAge0AndNoCacheInRequest(t *testing.T) {
 	assert.Equal(t, 1, backendRequests)
 }
 
-// TestClientConditionalRequest tests that Varnish will understand a client's conditional request
+// TestClientConditionalRequestWithEtag tests that Varnish will understand a client's conditional request
 // and will respond with a cached item (only headers) when the client sends an "If-None-Match"
 // that matches the cached item's Etag validator.
 func TestClientConditionalRequestWithEtag(t *testing.T) {
