@@ -86,7 +86,7 @@ backend default {
 			"host.docker.internal:host-gateway",
 		},
 		Tmpfs: map[string]string{
-			"/tmp": "exec,mode=777,uid=1000,gid=1000",
+			"/tmp": "exec,mode=700,uid=1000,gid=1000",
 		},
 		Binds: []string{vclFileName + ":/etc/varnish/default.vcl"},
 		PortBindings: nat.PortMap{
