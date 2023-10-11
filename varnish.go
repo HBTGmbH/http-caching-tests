@@ -61,6 +61,10 @@ backend default {
 	containerResponse, err := cli.ContainerCreate(context.Background(), &container.Config{
 		Image: varnishImage,
 		ExposedPorts: nat.PortSet{
+			// Expose an unprivileged port (we use 8080).
+			// The image only exposes the privileged port 80 and 8443 by default.
+			// We also must expose any port other than the image-declared ports
+			// if we want to map these ports to the host.
 			"8080/tcp": struct{}{},
 		},
 		Cmd: []string{
@@ -74,25 +78,33 @@ backend default {
 			"default_keep=" + withDefault(config.DefaultKeep, "0s"),
 		},
 		Env: []string{
+			// The entrypoint script of the image uses environment variables
+			// to override the bind port (we use 8080) and the cache size (we use 1M).
 			"VARNISH_HTTP_PORT=8080",
 			"VARNISH_SIZE=1M",
 		},
 	}, &container.HostConfig{
-		CapDrop:        []string{"ALL"},
-		Privileged:     false,
-		ReadonlyRootfs: true,
-		AutoRemove:     true,
+		CapDrop:        []string{"ALL"}, // <- drop all capabilities
+		Privileged:     false,           // <- run as unprivileged user
+		ReadonlyRootfs: true,            // <- mount the root filesystem as read-only
+		AutoRemove:     true,            // <- automatically remove the container when it exits
 		ExtraHosts: []string{
+			// Make the host's network available to the container
+			// via the special DNS name host.docker.internal.
 			"host.docker.internal:host-gateway",
 		},
 		Tmpfs: map[string]string{
+			// Mount a tmpfs volume to /tmp for the Varnish workdir.
 			"/tmp": "exec,mode=700,uid=1000,gid=1000",
 		},
+		// Mount the default.vcl file we created above as /etc/varnish/default.vcl
 		Binds: []string{vclFileName + ":/etc/varnish/default.vcl"},
 		PortBindings: nat.PortMap{
+			// Map the container's port 8080 to a random port on the host.
+			// We will later figure out the allocated host port.
 			"8080/tcp": []nat.PortBinding{{
-				HostIP:   "",
-				HostPort: "0",
+				HostIP:   "",  // <- bind to all interfaces
+				HostPort: "0", // <- use random host port
 			}},
 		},
 	}, nil, nil, "")
@@ -106,7 +118,7 @@ backend default {
 		return "", nil, err
 	}
 
-	// figure out the allocated port
+	// figure out the allocated host port (note: we used "0" as port above)
 	containerInspect, err := cli.ContainerInspect(context.Background(), containerResponse.ID)
 	if err != nil {
 		return "", nil, err
