@@ -751,14 +751,13 @@ func TestClientConditionalRequestWithEtag(t *testing.T) {
 	assert.Equal(t, 1, backendRequests)
 }
 
-// TestStaleWhileRevalidateWithoutDuration tests what Varnish will do when the backend responds with
-// "Cache-Control: stale-while-revalidate" without a duration.
+// TestStaleWhileRevalidateWithoutDurationWhenZeroDefaultGrace tests what Varnish will do when the backend responds with
+// "Cache-Control: stale-while-revalidate" without a duration and a zero default grace period.
 // Currently, apparently Varnish will interpret this as stale-while-revalidate=0.
-//
 // See also: https://datatracker.ietf.org/doc/html/rfc5861#section-3
 // According to this specification, the syntax for "stale-while-revalidate" is always
 // "stale-while-revalidate=<seconds>", so it is actually not allowed to omit the duration.
-func TestStaleWhileRevalidateWithoutDuration(t *testing.T) {
+func TestStaleWhileRevalidateWithoutDurationWhenZeroDefaultGrace(t *testing.T) {
 	t.Parallel()
 	var backendRequests int
 
@@ -794,6 +793,53 @@ func TestStaleWhileRevalidateWithoutDuration(t *testing.T) {
 	assert.Equal(t, "bar", reqR(t, port, "bar").xResponse)
 	time2 = time.Now()
 	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
+
+// TestStaleWhileRevalidateWithoutDurationWhenNonZeroDefaultGrace tests what Varnish will do when the backend responds
+// with "Cache-Control: stale-while-revalidate" without a duration when there is a non-zero default grace period.
+// This is similar to TestStaleWhileRevalidateWithoutDurationWhenZeroDefaultGrace above just that
+// we define a default grace period here.
+func TestStaleWhileRevalidateWithoutDurationWhenNonZeroDefaultGrace(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		time.Sleep(500 * time.Millisecond)
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.Header().Set("Cache-Control", "s-maxage=1, stale-while-revalidate")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort:  testServerPort,
+		DefaultGrace: "10s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request
+	time1 := time.Now()
+	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	time2 := time.Now()
+	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
+
+	// wait a bit for the response to become stale
+	time.Sleep(1100 * time.Millisecond)
+
+	// send another request which should respond immediately with the previously cached response
+	// and trigger an asynchronous revalidation due to the non-zero default grace which will be applied here.
+	time1 = time.Now()
+	assert.Equal(t, "foo", reqR(t, port, "bar").xResponse)
+	time2 = time.Now()
+	assert.Less(t, time2.Sub(time1), 100*time.Millisecond)
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
