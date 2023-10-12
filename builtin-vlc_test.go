@@ -750,3 +750,54 @@ func TestClientConditionalRequestWithEtag(t *testing.T) {
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
 }
+
+// TestStaleWhileRevalidateWithoutDuration tests what Varnish will do when the backend responds with
+// "Cache-Control: stale-while-revalidate" without a duration.
+// Currently, apparently Varnish will interpret this as stale-while-revalidate=0.
+//
+// See also: https://datatracker.ietf.org/doc/html/rfc5861#section-3
+// According to this specification, the syntax for "stale-while-revalidate" is always
+// "stale-while-revalidate=<seconds>", so it is actually not allowed to omit the duration.
+func TestStaleWhileRevalidateWithoutDuration(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		time.Sleep(500 * time.Millisecond)
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.Header().Set("Cache-Control", "s-maxage=1, stale-while-revalidate")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request
+	time1 := time.Now()
+	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	time2 := time.Now()
+	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
+
+	// wait a bit for the response to become stale
+	time.Sleep(1100 * time.Millisecond)
+
+	// send another request which should also hit the backend synchronously
+	time1 = time.Now()
+	assert.Equal(t, resp(http.StatusOK, "bar"), reqR(t, port, "bar"))
+	time2 = time.Now()
+	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
+
+	// wait a bit for revalidation
+	time.Sleep(100 * time.Millisecond)
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
