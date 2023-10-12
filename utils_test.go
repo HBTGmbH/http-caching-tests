@@ -14,15 +14,24 @@ import (
 )
 
 type response struct {
-	statusCode int
-	xResponse  string
-	body       string
+	statusCode   int
+	xResponse    string
+	body         string
+	cacheControl string
 }
 
 func resp(statusCode int, xResponse string) response {
 	return response{
 		statusCode: statusCode,
 		xResponse:  xResponse,
+	}
+}
+
+func respCC(statusCode int, xResponse string, cacheControl string) response {
+	return response{
+		statusCode:   statusCode,
+		xResponse:    xResponse,
+		cacheControl: cacheControl,
 	}
 }
 
@@ -35,40 +44,44 @@ func respB(statusCode int, xResponse, body string) response {
 }
 
 func reqR(t *testing.T, port, xRequest string) response {
-	return req(t, port, "GET", 0, xRequest, "", "", "", "", false)
+	return req(t, port, "/", "GET", 0, xRequest, "", "", "", "", false)
+}
+
+func reqPR(t *testing.T, port, path, xRequest string) response {
+	return req(t, port, path, "GET", 0, xRequest, "", "", "", "", false)
 }
 
 func reqMR(t *testing.T, port, method, xRequest string) response {
-	return req(t, port, method, 0, xRequest, "", "", "", "", false)
+	return req(t, port, "/", method, 0, xRequest, "", "", "", "", false)
 }
 
 func reqRCC(t *testing.T, port, xRequest, cacheControl string) response {
-	return req(t, port, "GET", 0, xRequest, cacheControl, "", "", "", false)
+	return req(t, port, "/", "GET", 0, xRequest, cacheControl, "", "", "", false)
 }
 
 func reqR_B(t *testing.T, port, xRequest string) response {
-	return req(t, port, "GET", 0, xRequest, "", "", "", "", true)
+	return req(t, port, "/", "GET", 0, xRequest, "", "", "", "", true)
 }
 
 func reqRA(t *testing.T, port, xRequest, authorization string) response {
-	return req(t, port, "GET", 0, xRequest, "", authorization, "", "", false)
+	return req(t, port, "/", "GET", 0, xRequest, "", authorization, "", "", false)
 }
 
 func reqRC(t *testing.T, port, xRequest, cookie string) response {
-	return req(t, port, "GET", 0, xRequest, "", "", cookie, "", false)
+	return req(t, port, "/", "GET", 0, xRequest, "", "", cookie, "", false)
 }
 
 func reqSR(t *testing.T, port string, status int, xRequest string) response {
-	return req(t, port, "GET", status, xRequest, "", "", "", "", false)
+	return req(t, port, "/", "GET", status, xRequest, "", "", "", "", false)
 }
 
 func reqRINM(t *testing.T, port, xRequest, ifNoneMatch string) response {
-	return req(t, port, "GET", 0, xRequest, "", "", "", ifNoneMatch, true)
+	return req(t, port, "/", "GET", 0, xRequest, "", "", "", ifNoneMatch, true)
 }
 
-func req(t *testing.T, port, method string, status int, xRequest, cacheControl, authorization, cookie, ifNoneMatch string, storeBody bool) response {
+func req(t *testing.T, port, path, method string, status int, xRequest, cacheControl, authorization, cookie, ifNoneMatch string, storeBody bool) response {
 	httpClient := http.Client{}
-	req, err := http.NewRequest(method, "http://localhost:"+port+"/", nil)
+	req, err := http.NewRequest(method, "http://localhost:"+port+path, nil)
 	if status != 0 {
 		req.Header.Set("X-Status-Code", strconv.Itoa(status))
 	}
@@ -95,9 +108,10 @@ func req(t *testing.T, port, method string, status int, xRequest, cacheControl, 
 		body = readBody(t, resp)
 	}
 	return response{
-		statusCode: resp.StatusCode,
-		xResponse:  resp.Header.Get("X-Response"),
-		body:       body,
+		statusCode:   resp.StatusCode,
+		xResponse:    resp.Header.Get("X-Response"),
+		body:         body,
+		cacheControl: resp.Header.Get("Cache-Control"),
 	}
 }
 

@@ -791,7 +791,7 @@ func TestStaleWhileRevalidateWithoutDuration(t *testing.T) {
 
 	// send another request which should also hit the backend synchronously
 	time1 = time.Now()
-	assert.Equal(t, resp(http.StatusOK, "bar"), reqR(t, port, "bar"))
+	assert.Equal(t, "bar", reqR(t, port, "bar").xResponse)
 	time2 = time.Now()
 	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
 

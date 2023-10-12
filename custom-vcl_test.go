@@ -172,3 +172,38 @@ sub vcl_backend_response {
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
 }
+
+// TestRemoveIllegalStaleWhileRevalidateWithoutValue tests a custom implementation of
+// vcl_backend_response which removes any stale-while-revalidate directive without a duration from the
+// Cache-Control header, which would be illegal according to RFC 5861.
+// See: https://datatracker.ietf.org/doc/html/rfc5861#section-3
+func TestRemoveIllegalStaleWhileRevalidateWithoutValue(t *testing.T) {
+	t.Parallel()
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_backend_response {
+  set beresp.http.Cache-Control = regsub(beresp.http.Cache-Control, "(,\s+)?stale-while-revalidate(?!\s*=\s*)", "");
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	assert.Equal(t, respCC(http.StatusOK, "", "s-maxage=10"), reqPR(t, port, "/1", "s-maxage=10, stale-while-revalidate"))
+	assert.Equal(t, respCC(http.StatusOK, "", "public, s-maxage=10"), reqPR(t, port, "/2", "public, s-maxage=10, stale-while-revalidate"))
+	assert.Equal(t, respCC(http.StatusOK, "", "s-maxage=10, public"), reqPR(t, port, "/3", "s-maxage=10, stale-while-revalidate, public"))
+	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate=10, public"), reqPR(t, port, "/4", "stale-while-revalidate=10, public"))
+	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate=10"), reqPR(t, port, "/5", "stale-while-revalidate=10"))
+	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate = 10"), reqPR(t, port, "/6", "stale-while-revalidate = 10"))
+	assert.Equal(t, respCC(http.StatusOK, "", ""), reqPR(t, port, "/7", "stale-while-revalidate"))
+}
