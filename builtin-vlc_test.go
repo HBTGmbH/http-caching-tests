@@ -841,6 +841,9 @@ func TestStaleWhileRevalidateWithoutDurationWhenNonZeroDefaultGrace(t *testing.T
 	time2 = time.Now()
 	assert.Less(t, time2.Sub(time1), 100*time.Millisecond)
 
+	// wait a bit for the asynchronous revalidation to complete
+	time.Sleep(100 * time.Millisecond)
+
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
 }
