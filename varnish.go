@@ -103,7 +103,7 @@ backend default {
 			// Map the container's port 8080 to a random port on the host.
 			// We will later figure out the allocated host port.
 			"8080/tcp": []nat.PortBinding{{
-				HostIP:   "",  // <- bind to all interfaces
+				HostIP:   "127.0.0.1",  // <- bind to loopback interface
 				HostPort: "0", // <- use random host port
 			}},
 		},
