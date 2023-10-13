@@ -847,3 +847,50 @@ func TestStaleWhileRevalidateWithoutDurationWhenNonZeroDefaultGrace(t *testing.T
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
 }
+
+// TestStaleWhileRevalidateZeroDoesNotMeanDefaultGrace tests that the default grace period will not apply
+// when the backend responds with "Cache-Control: stale-while-revalidate=0".
+// The default grace period should only apply if Varnish could not figure out the grace period
+// from the response headers, e.g. when Cache-Control contains no or contains an _invalid_
+// stale-while-revalidate (without a duration).
+func TestStaleWhileRevalidateZeroDoesNotMeanDefaultGrace(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		time.Sleep(500 * time.Millisecond)
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.Header().Set("Cache-Control", "max-age=1, stale-while-revalidate=0")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort:  testServerPort,
+		DefaultGrace: "10s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request
+	time1 := time.Now()
+	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	time2 := time.Now()
+	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
+
+	// wait a bit for the response to become stale
+	time.Sleep(1100 * time.Millisecond)
+
+	// send another request which should also hit the backend synchronously
+	time1 = time.Now()
+	assert.Equal(t, "bar", reqR(t, port, "bar").xResponse)
+	time2 = time.Now()
+	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
