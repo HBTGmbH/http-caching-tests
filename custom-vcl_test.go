@@ -210,3 +210,41 @@ sub vcl_backend_response {
 	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate = 10"), reqPR(t, port, "/6", "stale-while-revalidate = 10"))
 	assert.Equal(t, respCC(http.StatusOK, "", ""), reqPR(t, port, "/7", "stale-while-revalidate"))
 }
+
+// TestReturnPassInVclRecvBypassesTheCache tests that returning pass in vcl_recv bypasses the cache.
+func TestReturnPassInVclRecvBypassesTheCache(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort:  testServerPort,
+		DefaultTtl:   "1s",
+		DefaultGrace: "10s",
+		Vcl: `
+sub vcl_recv {
+  if (req.http.X-Request) {
+    return (pass);
+  }
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "foo"))
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "foo"))
+	time.Sleep(100 * time.Millisecond)
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
