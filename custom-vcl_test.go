@@ -126,6 +126,9 @@ sub vcl_backend_response {
 	assert.Equal(t, resp(http.StatusInternalServerError, "foo"), reqR(t, port, "bar"))
 
 	// expect one backend request
+	// If beresp.uncacheable would have been set to true, we would have gotten a Hit-For-Miss object
+	// and thus _two_ backend requests. This test was to verify that this is _not_ the case and
+	// we only got one backend request.
 	assert.Equal(t, 1, backendRequests)
 }
 
