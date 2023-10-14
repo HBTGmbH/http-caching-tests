@@ -1,4 +1,4 @@
-// Contains tests for behaviour using custom VCL implementations
+// Contains tests for handling of errors
 package caching_test
 
 import (

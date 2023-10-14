@@ -306,7 +306,7 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
 		xRequest := r.Header.Get("X-Request")
 		if xRequest == "2" {
-			time.Sleep(2000 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		}
 		w.Header().Set("Cache-Control", "max-age=1, stale-while-revalidate=10")
 		w.Header().Set("X-Response", r.Header.Get("X-Request"))
@@ -336,8 +336,8 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	// expect the response to have come back very fast
 	assert.Less(t, time2.Sub(time1), 100*time.Millisecond)
 
-	// sleep for 2.1 seconds to let Varnish revalidate the cached response
-	time.Sleep(2100 * time.Millisecond)
+	// sleep for 600 ms to let Varnish revalidate the cached response
+	time.Sleep(600 * time.Millisecond)
 
 	// send yet another request and expect to receive the second cached response
 	assert.Equal(t, "2", reqR(t, port, "3").xResponse)
@@ -356,7 +356,6 @@ func TestStaleWhileRevalidateWithoutTtlOrExpiresAndZeroDefaultTtl(t *testing.T) 
 	// start a test server
 	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
 		backendRequests++
-		//time.Sleep(1 * time.Second)
 		w.Header().Set("Cache-Control", "stale-while-revalidate=1")
 		w.Header().Set("X-Response", r.Header.Get("X-Request"))
 		w.WriteHeader(http.StatusOK)
