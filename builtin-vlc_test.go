@@ -346,6 +346,45 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	assert.Equal(t, 2, backendRequests)
 }
 
+// TestStaleWhileRevalidateWithoutTtlOrExpiresAndZeroDefaultTtl tests that Varnish will not cache a response
+// (not even for the grace period) when the backend responded with a "Cache-Control: stale-while-revalidate"
+// header but the response did not have a "Cache-Control: max-age" or "Expires" and the default TTL is 0.
+func TestStaleWhileRevalidateWithoutTtlOrExpiresAndZeroDefaultTtl(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		//time.Sleep(1 * time.Second)
+		w.Header().Set("Cache-Control", "stale-while-revalidate=1")
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send first request which should get a grace of only 1s
+	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), reqR(t, port, "foo"))
+
+	// with a non-existing max-age/TTL/Expires or 0, the behaviour of Varnish is to not cache the response
+	// at all, also not for the grace period. So, every request will essentially be a pass.
+	time.Sleep(500 * time.Millisecond)
+
+	// send another request and expect a new synchronous backend request
+	assert.Equal(t, respCC(http.StatusOK, "bar", "stale-while-revalidate=1"), reqR(t, port, "bar"))
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
+
 // TestHitForMissAndNoRequestCoalescingWhenNoStore tests that Varnish will not serialize multiple requests when
 // the first response marks the response as uncacheable due to "Cache-Control: no-store".
 // This is tested by sending N requests in parallel, where the first request will take about 1 second to
