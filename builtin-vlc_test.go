@@ -643,9 +643,9 @@ func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 // a 304 response (without a body) while still retaining the body of the first cached response.
 func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	t.Parallel()
-	var backendRequests int
+	var backendRequests = 0
 
-	lastModified := time.Now().UTC().Format(http.TimeFormat)
+	lastModified := time.Now().Add(-2 * time.Hour).UTC().Format(http.TimeFormat)
 
 	// start a test server
 	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
