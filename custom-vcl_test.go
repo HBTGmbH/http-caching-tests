@@ -350,3 +350,50 @@ sub vcl_recv {
 	// expect three backend requests
 	assert.Equal(t, 3, backendRequests)
 }
+
+// TestSetBerespTtlToTinyValueAllowsForStaleWhileRevalidate tests that setting beresp.ttl to even a tiny
+// duration allows for stale-while-revalidate to work, because then Varnish will actually keep the cached
+// object around for the grace period allowing for asynchronous backend revalidation requests.
+func TestSetBerespTtlToTinyValueAllowsForStaleWhileRevalidate(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		w.Header().Set("Cache-Control", "stale-while-revalidate=1")
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_backend_response {
+  set beresp.ttl = 10ms;
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send first request should get a grace of 1s
+	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), reqR(t, port, "foo"))
+
+	// wait a bit but still within grace
+	time.Sleep(200 * time.Millisecond)
+
+	// send another request and expect a cached response and an asynchronous backend request
+	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), reqR(t, port, "bar"))
+
+	// wait to get outside of grace
+	time.Sleep(1100 * time.Millisecond)
+
+	// send another request and expect a synchronous backend request
+	assert.Equal(t, respCC(http.StatusOK, "buzz", "stale-while-revalidate=1"), reqR(t, port, "buzz"))
+
+	// expect three backend requests
+	assert.Equal(t, 3, backendRequests)
+}
