@@ -264,7 +264,6 @@ func TestSettingReqGraceInVclRecvIsUpperCapForBerespGraceInVclBackendResponse(t 
 	// start a test server
 	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
 		backendRequests++
-		time.Sleep(500 * time.Millisecond)
 		w.Header().Set("X-Response", r.Header.Get("X-Request"))
 		w.WriteHeader(http.StatusOK)
 	})
@@ -278,6 +277,7 @@ sub vcl_recv {
   set req.grace = 1s;
 }
 sub vcl_backend_response {
+  set beresp.ttl = 100ms;
   set beresp.grace = 10s;
 }`,
 	})
@@ -286,17 +286,67 @@ sub vcl_backend_response {
 	waitForHealthy(t, port)
 
 	// send first request which should get a grace of only 1s
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "foo"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", ""), reqR(t, port, "foo"))
 
-	// wait for the grace to expire
-	time.Sleep(1100 * time.Millisecond)
+	// wait for the response to become stale but still within grace
+	time.Sleep(200 * time.Millisecond)
+
+	// send another request and expect a cached response and an asynchronous backend request
+	assert.Equal(t, respCC(http.StatusOK, "foo", ""), reqR(t, port, "bar"))
+
+	// wait to get outside of grace, which should only have been 1s
+	time.Sleep(1200 * time.Millisecond)
 
 	// send another request and expect a synchronous backend request
-	time1 := time.Now()
-	assert.Equal(t, resp(http.StatusOK, "bar"), reqR(t, port, "bar"))
-	time2 := time.Now()
-	assert.Greater(t, time2.Sub(time1), 500*time.Millisecond)
+	assert.Equal(t, respCC(http.StatusOK, "buzz", ""), reqR(t, port, "buzz"))
 
-	// expect two backend requests
-	assert.Equal(t, 2, backendRequests)
+	// expect three backend requests
+	assert.Equal(t, 3, backendRequests)
+}
+
+// TestSettingReqGraceInVclRecvIsUpperCapForSwrOfBackendResponse tests that setting
+// req.grace in vcl_recv is the upper cap for any possible stale-while-revalidate in the
+// Cache-Control header of the backend response.
+func TestSettingReqGraceInVclRecvIsUpperCapForSwrOfBackendResponse(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		w.Header().Set("Cache-Control", "max-age=1, stale-while-revalidate=10")
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_recv {
+  set req.grace = 1s;
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send first request which should get a grace of only 1s
+	assert.Equal(t, respCC(http.StatusOK, "foo", "max-age=1, stale-while-revalidate=10"), reqR(t, port, "foo"))
+
+	// wait for the response to become stale but still within grace
+	time.Sleep(1200 * time.Millisecond)
+
+	// send another request and expect a cached response and an asynchronous backend request
+	assert.Equal(t, respCC(http.StatusOK, "foo", "max-age=1, stale-while-revalidate=10"), reqR(t, port, "bar"))
+
+	// wait to get outside of grace, which should only have been 1s
+	time.Sleep(2200 * time.Millisecond)
+
+	// send another request and expect a synchronous backend request
+	assert.Equal(t, respCC(http.StatusOK, "buzz", "max-age=1, stale-while-revalidate=10"), reqR(t, port, "buzz"))
+
+	// expect three backend requests
+	assert.Equal(t, 3, backendRequests)
 }
