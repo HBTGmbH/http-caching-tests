@@ -404,3 +404,56 @@ sub vcl_backend_response {
 	// expect three backend requests
 	assert.Equal(t, 3, backendRequests)
 }
+
+// TestDoNotSetBerespTtlWhenCacheControlPrivate tests that we do not set beresp.ttl to a tiny value
+// when the Cache-Control header contains a private directive.
+func TestDoNotSetBerespTtlWhenCacheControlPrivate(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		w.Header().Set("Cache-Control", "private, stale-while-revalidate=1")
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_backend_response {
+  if (beresp.ttl == 0s && beresp.http.Cache-Control ~ "stale-while-revalidate" && beresp.http.Cache-Control !~ "private|no-store|no-cache") {
+    # If the backend response specifies a zero TTL but also has a stale-while-revalidate
+    # directive, the desired behaviour should be to make the response stale immediately
+    # and revalidate it in the background for the specified swr/grace duration.
+    # But since Varnish will not cache a TTL=0 at all (not even for grace), we need to set
+    # a small TTL to make the response being cached (even if for the swr/grace duration only).
+    set beresp.ttl = 1ms;
+  }
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send first request
+	assert.Equal(t, respCC(http.StatusOK, "foo", "private, stale-while-revalidate=1"), reqR(t, port, "foo"))
+
+	// wait a bit
+	time.Sleep(200 * time.Millisecond)
+
+	// send another request and expect a new synchronous backend request
+	assert.Equal(t, respCC(http.StatusOK, "bar", "private, stale-while-revalidate=1"), reqR(t, port, "bar"))
+
+	// wait to get outside of supposed grace period
+	time.Sleep(1100 * time.Millisecond)
+
+	// send another request and also expect a synchronous backend request
+	assert.Equal(t, respCC(http.StatusOK, "buzz", "private, stale-while-revalidate=1"), reqR(t, port, "buzz"))
+
+	// expect three backend requests
+	assert.Equal(t, 3, backendRequests)
+}
