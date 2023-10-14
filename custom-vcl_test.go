@@ -372,7 +372,14 @@ func TestSetBerespTtlToTinyValueAllowsForStaleWhileRevalidate(t *testing.T) {
 		BackendPort: testServerPort,
 		Vcl: `
 sub vcl_backend_response {
-  set beresp.ttl = 10ms;
+  if (beresp.ttl == 0s && beresp.http.Cache-Control ~ "stale-while-revalidate" && beresp.http.Cache-Control !~ "private|no-store|no-cache") {
+    # If the backend response specifies a zero TTL but also has a stale-while-revalidate
+    # directive, the desired behaviour should be to make the response stale immediately
+    # and revalidate it in the background for the specified swr/grace duration.
+    # But since Varnish will not cache a TTL=0 at all (not even for grace), we need to set
+    # a small TTL to make the response being cached (even if for the swr/grace duration only).
+    set beresp.ttl = 1ms;
+  }
 }`,
 	})
 	require.NoError(t, err)
