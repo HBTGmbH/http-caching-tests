@@ -240,10 +240,62 @@ sub vcl_recv {
 	defer stopFunc()
 	waitForHealthy(t, port)
 
+	// send first request which will be passed through to the backend
 	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "foo"))
+
+	// wait a bit (for no reason, really)
 	time.Sleep(100 * time.Millisecond)
+
+	// send another request and expect a new backend request because
 	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "foo"))
-	time.Sleep(100 * time.Millisecond)
+
+	// expect two backend requests
+	assert.Equal(t, 2, backendRequests)
+}
+
+// TestSettingReqGraceInVclRecvIsUpperCapForBerespGraceInVclBackendResponse tests that setting
+// req.grace in vcl_recv is the upper cap for any possible beresp.grace in vcl_backend_response.
+// This means that vcl_recv can control the maximum grace period regardless of what the backend
+// sends or what is being overwritten in vcl_backend_response.
+func TestSettingReqGraceInVclRecvIsUpperCapForBerespGraceInVclBackendResponse(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		time.Sleep(500 * time.Millisecond)
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_recv {
+  set req.grace = 1s;
+}
+sub vcl_backend_response {
+  set beresp.grace = 10s;
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send first request which should get a grace of only 1s
+	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "foo"))
+
+	// wait for the grace to expire
+	time.Sleep(1100 * time.Millisecond)
+
+	// send another request and expect a synchronous backend request
+	time1 := time.Now()
+	assert.Equal(t, resp(http.StatusOK, "bar"), reqR(t, port, "bar"))
+	time2 := time.Now()
+	assert.Greater(t, time2.Sub(time1), 500*time.Millisecond)
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
