@@ -457,3 +457,55 @@ sub vcl_backend_response {
 	// expect three backend requests
 	assert.Equal(t, 3, backendRequests)
 }
+
+// TestRetainOnlyNeededCookies tests that removing specific cookies works with the code shown under
+// https://www.varnish-software.com/developers/tutorials/removing-cookies-varnish/#only-keep-required-cookies
+func TestRetainOnlyNeededCookies(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		assert.Equal(t, r.Header.Get("X-Request"), r.Header.Get("Cookie"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+# Remove all cookies that are not needed for the request,
+# but would otherwise render the response uncacheable.
+# See: https://www.varnish-software.com/developers/tutorials/removing-cookies-varnish/#only-keep-required-cookies
+sub retain_only_needed_cookies {
+  if (req.http.Cookie) {
+    set req.http.Cookie = ";" + req.http.Cookie;
+    set req.http.Cookie = regsuball(req.http.Cookie, "; +", ";");
+    set req.http.Cookie = regsuball(req.http.Cookie, ";(__prerender_bypass|__n-p-d)=", "; \1=");
+    set req.http.Cookie = regsuball(req.http.Cookie, ";[^ ][^;]*", "");
+    set req.http.Cookie = regsuball(req.http.Cookie, "^[; ]+|[; ]+$", "");
+    if (req.http.cookie ~ "^\s*$") {
+      unset req.http.cookie;
+    }
+  }
+}
+sub vcl_recv {
+  call retain_only_needed_cookies;
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	reqRC(t, port, "__prerender_bypass=1", "__prerender_bypass=1")
+	reqRC(t, port, "__n-p-d=1", "__n-p-d=1")
+	reqRC(t, port, "", "")
+	reqRC(t, port, "", "foo=bar")
+	reqRC(t, port, "__prerender_bypass=1", "foo=bar; __prerender_bypass=1")
+	reqRC(t, port, "__n-p-d=1", "foo=bar; __n-p-d=1")
+	reqRC(t, port, "__prerender_bypass=1", "__prerender_bypass=1; foo=bar")
+	reqRC(t, port, "__prerender_bypass=1", "a=b=3; __prerender_bypass=1; foo=bar=2")
+	reqRC(t, port, "", "a=b=3; foo=bar=2; c=3")
+}
