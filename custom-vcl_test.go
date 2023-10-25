@@ -509,3 +509,86 @@ sub vcl_recv {
 	reqRC(t, port, "__prerender_bypass=1", "a=b=3; __prerender_bypass=1; foo=bar=2")
 	reqRC(t, port, "", "a=b=3; foo=bar=2; c=3")
 }
+
+// TestSetXCacheResponseHeaderOnHitOrMiss tests whether vcl_hit and vcl_miss are called appropriately
+// and that we can transport information between vcl_hit/vcl_miss and vcl_deliver to indicate to the
+// client/caller whether it was a cache hit or a miss.
+func TestSetXCacheResponseHeaderOnHitOrMiss(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		w.Header().Set("Cache-Control", "max-age=1, stale-while-revalidate=1")
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_hit {
+  # mark the hit on the client request object
+  # (we don't have resp here)
+  set req.http.x-cache = "hit";
+}
+sub vcl_miss {
+  # mark the miss on the client request object
+  # (we don't have resp here)
+  set req.http.x-cache = "miss";
+}
+sub vcl_deliver {
+  # Transport the x-cache from req to resp
+  set resp.http.x-cache = req.http.x-cache;
+}
+`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// do the first request, which will be a miss
+	assert.Equal(t, response{
+		statusCode:   200,
+		xResponse:    "foo",
+		xCache:       "miss",
+		cacheControl: "max-age=1, stale-while-revalidate=1",
+	}, reqR(t, port, "foo"))
+
+	// do the second request, which will be a hit due to being within TTL
+	assert.Equal(t, response{
+		statusCode:   200,
+		xResponse:    "foo",
+		xCache:       "hit",
+		cacheControl: "max-age=1, stale-while-revalidate=1",
+	}, reqR(t, port, "bar"))
+
+	// wait for being out of TTL
+	time.Sleep(1100 * time.Millisecond)
+
+	// do the third request, which will still be considered a hit because within grace
+	assert.Equal(t, response{
+		statusCode:   200,
+		xResponse:    "foo",
+		xCache:       "hit",
+		cacheControl: "max-age=1, stale-while-revalidate=1",
+	}, reqR(t, port, "baz"))
+
+	// wait a bit for background refresh
+	time.Sleep(100 * time.Millisecond)
+
+	// now, varnish will have refreshed the object in the background and it will again have a TTL of 1
+	// so we must wait for being out of TTL and of grace
+	time.Sleep(2100 * time.Millisecond)
+
+	// do the fourth request, which will be a miss
+	assert.Equal(t, response{
+		statusCode:   200,
+		xResponse:    "foobarbaz",
+		xCache:       "miss",
+		cacheControl: "max-age=1, stale-while-revalidate=1",
+	}, reqR(t, port, "foobarbaz"))
+}
