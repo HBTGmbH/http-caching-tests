@@ -2,6 +2,8 @@ package caching
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -103,8 +105,8 @@ backend default {
 			// Map the container's port 8080 to a random port on the host.
 			// We will later figure out the allocated host port.
 			"8080/tcp": []nat.PortBinding{{
-				HostIP:   "127.0.0.1",  // <- bind to loopback interface
-				HostPort: "0", // <- use random host port
+				HostIP:   "127.0.0.1", // <- bind to loopback interface
+				HostPort: "0",         // <- use random host port
 			}},
 		},
 	}, nil, nil, "")
@@ -117,6 +119,40 @@ backend default {
 	if err != nil {
 		return "", nil, err
 	}
+
+	// tail logs of container
+	i, err := cli.ContainerLogs(context.Background(), containerResponse.ID, types.ContainerLogsOptions{
+		ShowStderr: true,
+		ShowStdout: true,
+		Timestamps: false,
+		Follow:     true,
+		Tail:       "40",
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	hdr := make([]byte, 8)
+	go func() {
+		fmt.Printf("Start tailing logs for container %s\n", containerResponse.ID)
+		for {
+			_, err := i.Read(hdr)
+			if err != nil {
+				break
+			}
+			var w io.Writer
+			switch hdr[0] {
+			case 1:
+				w = os.Stdout
+			default:
+				w = os.Stderr
+			}
+			count := binary.BigEndian.Uint32(hdr[4:])
+			dat := make([]byte, count)
+			_, err = i.Read(dat)
+			fmt.Fprint(w, string(dat))
+		}
+		fmt.Printf("Stop tailing logs for container %s\n", containerResponse.ID)
+	}()
 
 	// figure out the allocated host port (note: we used "0" as port above)
 	containerInspect, err := cli.ContainerInspect(context.Background(), containerResponse.ID)
