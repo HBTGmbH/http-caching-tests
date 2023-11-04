@@ -45,11 +45,11 @@ func respB(statusCode int, xResponse, body string) response {
 }
 
 func reqR(t *testing.T, port, xRequest string) response {
-	return req(t, port, "/", "GET", 0, xRequest, "", "", "", "", false)
+	return req(t, port, "/", http.MethodGet, 0, xRequest, "", "", "", "", false)
 }
 
 func reqPR(t *testing.T, port, path, xRequest string) response {
-	return req(t, port, path, "GET", 0, xRequest, "", "", "", "", false)
+	return req(t, port, path, http.MethodGet, 0, xRequest, "", "", "", "", false)
 }
 
 func reqMR(t *testing.T, port, method, xRequest string) response {
@@ -57,27 +57,27 @@ func reqMR(t *testing.T, port, method, xRequest string) response {
 }
 
 func reqRCC(t *testing.T, port, xRequest, cacheControl string) response {
-	return req(t, port, "/", "GET", 0, xRequest, cacheControl, "", "", "", false)
+	return req(t, port, "/", http.MethodGet, 0, xRequest, cacheControl, "", "", "", false)
 }
 
 func reqR_B(t *testing.T, port, xRequest string) response {
-	return req(t, port, "/", "GET", 0, xRequest, "", "", "", "", true)
+	return req(t, port, "/", http.MethodGet, 0, xRequest, "", "", "", "", true)
 }
 
 func reqRA(t *testing.T, port, xRequest, authorization string) response {
-	return req(t, port, "/", "GET", 0, xRequest, "", authorization, "", "", false)
+	return req(t, port, "/", http.MethodGet, 0, xRequest, "", authorization, "", "", false)
 }
 
 func reqRC(t *testing.T, port, xRequest, cookie string) response {
-	return req(t, port, "/", "GET", 0, xRequest, "", "", cookie, "", false)
+	return req(t, port, "/", http.MethodGet, 0, xRequest, "", "", cookie, "", false)
 }
 
 func reqSR(t *testing.T, port string, status int, xRequest string) response {
-	return req(t, port, "/", "GET", status, xRequest, "", "", "", "", false)
+	return req(t, port, "/", http.MethodGet, status, xRequest, "", "", "", "", false)
 }
 
 func reqRINM(t *testing.T, port, xRequest, ifNoneMatch string) response {
-	return req(t, port, "/", "GET", 0, xRequest, "", "", "", ifNoneMatch, true)
+	return req(t, port, "/", http.MethodGet, 0, xRequest, "", "", "", ifNoneMatch, true)
 }
 
 func req(t *testing.T, port, path, method string, status int, xRequest, cacheControl, authorization, cookie, ifNoneMatch string, storeBody bool) response {
@@ -137,7 +137,7 @@ func startTestServer(handler http.HandlerFunc) (string, *httptest.Server) {
 func waitForHealthy(t *testing.T, port string) {
 	httpClient := http.Client{}
 	for i := 0; i < 100; i++ {
-		req, err := http.NewRequest("GET", "http://localhost:"+port+"/health", nil)
+		req, err := http.NewRequest(http.MethodGet, "http://localhost:"+port+"/health", nil)
 		require.NoError(t, err)
 		resp, err := httpClient.Do(req)
 		if err == nil && resp.StatusCode == http.StatusOK {

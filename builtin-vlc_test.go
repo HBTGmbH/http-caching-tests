@@ -117,13 +117,13 @@ func TestNoCachingOfPost(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send a POST request (which should not get cached)
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqMR(t, port, "POST", "foo"))
+	assert.Equal(t, resp(http.StatusOK, "foo"), reqMR(t, port, http.MethodPost, "foo"))
 
 	// wait half a second
 	time.Sleep(500 * time.Millisecond)
 
 	// send another request and expect an uncached response
-	assert.Equal(t, resp(http.StatusOK, "bar"), reqMR(t, port, "POST", "bar"))
+	assert.Equal(t, resp(http.StatusOK, "bar"), reqMR(t, port, http.MethodPost, "bar"))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
