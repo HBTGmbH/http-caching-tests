@@ -19,6 +19,7 @@ type response struct {
 	body         string
 	cacheControl string
 	xCache       string
+	cacheStatus  string
 }
 
 func resp(statusCode int, xResponse string) response {
@@ -114,6 +115,7 @@ func req(t *testing.T, port, path, method string, status int, xRequest, cacheCon
 		body:         body,
 		cacheControl: resp.Header.Get("Cache-Control"),
 		xCache:       resp.Header.Get("X-Cache"),
+		cacheStatus:  resp.Header.Get("Cache-Status"),
 	}
 }
 

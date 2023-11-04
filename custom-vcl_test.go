@@ -592,3 +592,90 @@ sub vcl_deliver {
 		cacheControl: "max-age=1, stale-while-revalidate=1",
 	}, reqR(t, port, "foobarbaz"))
 }
+
+func TestRfc9211CacheStatusImplementation(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+		Vcl: `
+sub vcl_hit {
+  set req.http.Cache-Status = "my-cache; hit";
+}
+sub vcl_miss {
+  set req.http.Cache-Status = "my-cache; fwd=miss";
+}
+sub vcl_pass {
+  if (req.method != "GET" && req.method != "HEAD") {
+    set req.http.Cache-Status = "my-cache; fwd=method; detail=" + req.method;
+  } else if (req.http.Authorization) {
+    set req.http.Cache-Status = "my-cache; fwd=bypass; detail=AUTHORIZATION";
+  } else if (req.http.Cookie) {
+    set req.http.Cache-Status = "my-cache; fwd=bypass; detail=COOKIE";
+  } else {
+    set req.http.Cache-Status = "my-cache; fwd=bypass; detail=OTHER";
+  }
+  set req.http.x-cache = "pass";
+}
+sub vcl_deliver {
+  set resp.http.Cache-Status = req.http.Cache-Status;
+}
+`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// forward because of POST method
+	assert.Equal(t, response{
+		statusCode:  200,
+		xResponse:   "foo",
+		cacheStatus: "my-cache; fwd=method; detail=POST",
+	}, reqMR(t, port, http.MethodPost, "foo"))
+
+	// forward because of PUT method
+	assert.Equal(t, response{
+		statusCode:  200,
+		xResponse:   "bar",
+		cacheStatus: "my-cache; fwd=method; detail=PUT",
+	}, reqMR(t, port, http.MethodPut, "bar"))
+
+	// forward because of Authorization header
+	assert.Equal(t, response{
+		statusCode:  200,
+		xResponse:   "baz",
+		cacheStatus: "my-cache; fwd=bypass; detail=AUTHORIZATION",
+	}, req(t, port, "/", http.MethodGet, 200, "baz", "", "Bearer Test", "", "", false))
+
+	// forward because of Cookie header
+	assert.Equal(t, response{
+		statusCode:  200,
+		xResponse:   "foobar",
+		cacheStatus: "my-cache; fwd=bypass; detail=COOKIE",
+	}, req(t, port, "/", http.MethodGet, 200, "foobar", "", "", "myCookieValue=3", "", false))
+
+	// miss because no object in cache
+	assert.Equal(t, response{
+		statusCode:  200,
+		xResponse:   "foobaz",
+		cacheStatus: "my-cache; fwd=miss",
+	}, reqR(t, port, "foobaz"))
+
+	// hit to cached object of previous request
+	assert.Equal(t, response{
+		statusCode:  200,
+		xResponse:   "foobaz",
+		cacheStatus: "my-cache; hit",
+	}, reqR(t, port, "barbaz"))
+}
