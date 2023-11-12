@@ -679,3 +679,84 @@ sub vcl_deliver {
 		cacheStatus: "my-cache; hit",
 	}, reqR(t, port, "barbaz"))
 }
+
+// TestDeliverInVclRecvMeansNonZeroObjTtlInVclDeliver tests that obj.ttl in vcl_deliver will
+// be the TTL (determine from max-age) of the backend response when vcl_recv uses return(hash),
+// which is the default.
+// This test was added for a situation where we wanted to know the TTL that a backend response
+// advertized in its Cache-Control header, in order to do different things conditionally based
+// on obj.ttl in vcl_deliver.
+// See also the next test below.
+func TestReturnHashInVclRecvMeansNonZeroObjTtlInVclDeliver(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		w.Header().Set("Cache-Control", "max-age=10, stale-while-revalidate=30")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_deliver {
+  set resp.http.X-Response = obj.ttl;
+}
+`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	resp := reqR(t, port, "")
+	xResponseAsFloat, err := strconv.ParseFloat(resp.xResponse, 32)
+	require.NoError(t, err)
+	assert.Equal(t, 200, resp.statusCode)
+	assert.Equal(t, 10.0, xResponseAsFloat)
+}
+
+// TestReturnPassInVclRecvMeansZeroObjTtlInVclDeliver tests that obj.ttl in vcl_deliver will
+// be zero regardless of the backend response when vcl_recv uses return(pass).
+// This test was added for a situation where we wanted to know the TTL that a backend response
+// advertized in its Cache-Control header, in order to do different things conditionally based
+// on obj.ttl in vcl_deliver, but we did not actually _cache_ the response in Varnish - only
+// repair/modify Cache-Control response headers. In this situation (with a pass), obj.ttl will
+// always be zero and cannot be used to determine the TTL of the backend response.
+func TestReturnPassInVclRecvMeansZeroObjTtlInVclDeliver(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		w.Header().Set("Cache-Control", "max-age=10, stale-while-revalidate=30")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_recv {
+  return (pass);
+}
+sub vcl_deliver {
+  set resp.http.X-Response = obj.ttl;
+}
+`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	resp := reqR(t, port, "")
+	xResponseAsFloat, err := strconv.ParseFloat(resp.xResponse, 32)
+	require.NoError(t, err)
+	assert.Equal(t, 200, resp.statusCode)
+	assert.Equal(t, 0.0, xResponseAsFloat)
+}
