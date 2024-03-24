@@ -15,7 +15,7 @@ import (
 
 var cli *client.Client
 
-const varnishImage = "varnish:7.4.1-alpine"
+const varnishImage = "varnish:7.5.0-alpine"
 
 type VarnishConfig struct {
 	BackendPort  string
@@ -115,13 +115,13 @@ backend default {
 	}
 
 	// start the container
-	err = cli.ContainerStart(context.Background(), containerResponse.ID, types.ContainerStartOptions{})
+	err = cli.ContainerStart(context.Background(), containerResponse.ID, container.StartOptions{})
 	if err != nil {
 		return "", nil, err
 	}
 
 	// tail logs of container
-	i, err := cli.ContainerLogs(context.Background(), containerResponse.ID, types.ContainerLogsOptions{
+	i, err := cli.ContainerLogs(context.Background(), containerResponse.ID, container.LogsOptions{
 		ShowStderr: true,
 		ShowStdout: true,
 		Timestamps: false,
