@@ -38,19 +38,19 @@ func TestNoCacheControl(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request
-	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo").xResponse)
 
 	// wait half a second
 	time.Sleep(500 * time.Millisecond)
 
 	// send another request and expect the previous cached return
-	assert.Equal(t, "foo", reqR(t, port, "bar").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "bar").xResponse)
 
 	// wait for 600 ms
 	time.Sleep(600 * time.Millisecond)
 
 	// send another request and expect no cached return
-	assert.Equal(t, "baz", reqR(t, port, "baz").xResponse)
+	assert.Equal(t, "baz", mkReq(t, port, "baz").xResponse)
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -82,13 +82,13 @@ func TestCachingOf404(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request and expect the backend to respond with 404
-	assert.Equal(t, resp(http.StatusNotFound, "foo"), reqSR(t, port, http.StatusNotFound, "foo"))
+	assert.Equal(t, resp(http.StatusNotFound, "foo"), mkReq(t, port, "foo", withXStatusCode(http.StatusNotFound)))
 
 	// wait half a second
 	time.Sleep(500 * time.Millisecond)
 
 	// send another request which the backend would respond with 200 but expect the previous cached 404 response
-	assert.Equal(t, resp(http.StatusNotFound, "foo"), reqSR(t, port, http.StatusOK, "bar"))
+	assert.Equal(t, resp(http.StatusNotFound, "foo"), mkReq(t, port, "bar", withXStatusCode(http.StatusOK)))
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -117,13 +117,13 @@ func TestNoCachingOfPost(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send a POST request (which should not get cached)
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqMR(t, port, http.MethodPost, "foo"))
+	assert.Equal(t, resp(http.StatusOK, "foo"), mkReq(t, port, "foo", withMethod(http.MethodPost)))
 
 	// wait half a second
 	time.Sleep(500 * time.Millisecond)
 
 	// send another request and expect an uncached response
-	assert.Equal(t, resp(http.StatusOK, "bar"), reqMR(t, port, http.MethodPost, "bar"))
+	assert.Equal(t, resp(http.StatusOK, "bar"), mkReq(t, port, "bar", withMethod(http.MethodPost)))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -157,13 +157,13 @@ func TestNoCachingOf500ErrorOnFirstRequest(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request resulting in 500
-	assert.Equal(t, resp(http.StatusInternalServerError, "1"), reqSR(t, port, http.StatusInternalServerError, "1"))
+	assert.Equal(t, resp(http.StatusInternalServerError, "1"), mkReq(t, port, "1", withXStatusCode(http.StatusInternalServerError)))
 
 	// wait half a second
 	time.Sleep(500 * time.Millisecond)
 
 	// send another request and expect the previous cached error
-	assert.Equal(t, resp(http.StatusOK, "2"), reqSR(t, port, http.StatusOK, "2"))
+	assert.Equal(t, resp(http.StatusOK, "2"), mkReq(t, port, "2", withXStatusCode(http.StatusOK)))
 
 	// expect two backend requests (because the first one wasn't cached)
 	assert.Equal(t, 2, backendRequests)
@@ -196,7 +196,7 @@ func TestNoCachingOf500ErrorInGracePeriodAfter200Request(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request resulting in 200
-	assert.Equal(t, resp(http.StatusOK, "1"), reqSR(t, port, http.StatusOK, "1"))
+	assert.Equal(t, resp(http.StatusOK, "1"), mkReq(t, port, "1", withXStatusCode(http.StatusOK)))
 
 	// wait 1.1 seconds to let the response expire
 	time.Sleep(1100 * time.Millisecond)
@@ -204,7 +204,7 @@ func TestNoCachingOf500ErrorInGracePeriodAfter200Request(t *testing.T) {
 	// send another request which would result in 500 but still expect the previous cached 200 response
 	// because we are still in the grace period and within that Varnish will perform background revalidation
 	// asynchronous to the client's request.
-	assert.Equal(t, resp(http.StatusOK, "1"), reqSR(t, port, http.StatusInternalServerError, "2"))
+	assert.Equal(t, resp(http.StatusOK, "1"), mkReq(t, port, "2", withXStatusCode(http.StatusInternalServerError)))
 
 	// wait a bit for Varnish to revalidate the cached response. After this, Varnish will have
 	// abandoned the cached 200 response and will also not have cached the 500 response resulting
@@ -212,11 +212,11 @@ func TestNoCachingOf500ErrorInGracePeriodAfter200Request(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// send another request which will result in a backend fetch returning 500.
-	assert.Equal(t, resp(http.StatusInternalServerError, "3"), reqSR(t, port, http.StatusInternalServerError, "3"))
+	assert.Equal(t, resp(http.StatusInternalServerError, "3"), mkReq(t, port, "3", withXStatusCode(http.StatusInternalServerError)))
 
 	// send yet another request which will also result in a backend fetch returning 500
 	// indicating that the previous response has not been cached.
-	assert.Equal(t, resp(http.StatusInternalServerError, "4"), reqSR(t, port, http.StatusInternalServerError, "4"))
+	assert.Equal(t, resp(http.StatusInternalServerError, "4"), mkReq(t, port, "4", withXStatusCode(http.StatusInternalServerError)))
 
 	// expect four backend requests
 	assert.Equal(t, 4, backendRequests)
@@ -253,10 +253,10 @@ func TestCacheControlNoCache(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request
-	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo").xResponse)
 
 	// send another request
-	assert.Equal(t, "bar", reqR(t, port, "bar").xResponse)
+	assert.Equal(t, "bar", mkReq(t, port, "bar").xResponse)
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -286,10 +286,10 @@ func TestCacheControlMaxAge1(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request to varnish
-	assert.Equal(t, "1", reqR(t, port, "1").xResponse)
+	assert.Equal(t, "1", mkReq(t, port, "1").xResponse)
 
 	// send another request and expect to receive a cached response
-	assert.Equal(t, "1", reqR(t, port, "2").xResponse)
+	assert.Equal(t, "1", mkReq(t, port, "2").xResponse)
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -324,14 +324,14 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request to varnish
-	assert.Equal(t, "1", reqR(t, port, "1").xResponse)
+	assert.Equal(t, "1", mkReq(t, port, "1").xResponse)
 
 	// sleep for 1.1 seconds to make the cached response stale
 	time.Sleep(1100 * time.Millisecond)
 
 	// send another request and expect to receive a cached response
 	time1 := time.Now()
-	assert.Equal(t, "1", reqR(t, port, "2").xResponse)
+	assert.Equal(t, "1", mkReq(t, port, "2").xResponse)
 	time2 := time.Now()
 	// expect the response to have come back very fast
 	assert.Less(t, time2.Sub(time1), 100*time.Millisecond)
@@ -340,7 +340,7 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	time.Sleep(600 * time.Millisecond)
 
 	// send yet another request and expect to receive the second cached response
-	assert.Equal(t, "2", reqR(t, port, "3").xResponse)
+	assert.Equal(t, "2", mkReq(t, port, "3").xResponse)
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -371,14 +371,14 @@ func TestStaleWhileRevalidateWithoutTtlOrExpiresAndZeroDefaultTtl(t *testing.T) 
 	waitForHealthy(t, port)
 
 	// send first request which should get a grace of only 1s
-	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), reqR(t, port, "foo"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), mkReq(t, port, "foo"))
 
 	// with a non-existing max-age/TTL/Expires or 0, the behaviour of Varnish is to not cache the response
 	// at all, also not for the grace period. So, every request will essentially be a pass.
 	time.Sleep(500 * time.Millisecond)
 
 	// send another request and expect a new synchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "bar", "stale-while-revalidate=1"), reqR(t, port, "bar"))
+	assert.Equal(t, respCC(http.StatusOK, "bar", "stale-while-revalidate=1"), mkReq(t, port, "bar"))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -427,7 +427,7 @@ func TestHitForMissAndNoRequestCoalescingWhenNoStore(t *testing.T) {
 		go func() {
 			// and assert that each request (with each individual X-Request header)
 			// gets a response with its corresponding individual X-Response header
-			assert.Equal(t, strconv.Itoa(i), reqR(t, port, strconv.Itoa(i)).xResponse)
+			assert.Equal(t, strconv.Itoa(i), mkReq(t, port, strconv.Itoa(i)).xResponse)
 			wg.Done()
 		}()
 	}
@@ -481,13 +481,13 @@ func TestNoCachingWhenRequestHasAuthorizationHeader(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request with Authorization header
-	assert.Equal(t, "foo", reqRA(t, port, "foo", "Test 12345").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo", withAuthorization("Test 12345")).xResponse)
 
 	// wait a bit
 	time.Sleep(50 * time.Millisecond)
 
 	// send another request and expect uncached response
-	assert.Equal(t, "bar", reqRA(t, port, "bar", "Test 67890").xResponse)
+	assert.Equal(t, "bar", mkReq(t, port, "bar", withAuthorization("Test 67890")).xResponse)
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -524,13 +524,13 @@ func TestNoCachingWhenRequestHasCookieHeader(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request with Authorization header
-	assert.Equal(t, "foo", reqRC(t, port, "foo", "test=12345").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo", withCookie("test=12345")).xResponse)
 
 	// wait a bit
 	time.Sleep(50 * time.Millisecond)
 
 	// send another request and expect uncached response
-	assert.Equal(t, "bar", reqRC(t, port, "bar", "test=67890").xResponse)
+	assert.Equal(t, "bar", mkReq(t, port, "bar", withCookie("test=67890")).xResponse)
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -562,7 +562,7 @@ func TestBackendRespondsWith304WhenUnconditionalRequest(t *testing.T) {
 	// send request which will be answered with 304 by the backend
 	// but Varnish will return 503 to the client, because the backend
 	// responding with a 304 for an unconditional request is an error.
-	assert.Equal(t, resp(http.StatusServiceUnavailable, ""), reqR(t, port, "foo"))
+	assert.Equal(t, resp(http.StatusServiceUnavailable, ""), mkReq(t, port, "foo"))
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -612,7 +612,7 @@ func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 	// send the first request which will be answered with 200 by the backend
 	// and cached for 1 second. The response will have an Etag header to
 	// enable conditional revalidation later.
-	assert.Equal(t, respB(http.StatusOK, "1", "foo"), reqR_B(t, port, "1"))
+	assert.Equal(t, respB(http.StatusOK, "1", "foo"), mkReq(t, port, "1", withStoreBody()))
 
 	// wait a bit for the response to become stale and enter the "keep" interval
 	// in which Varnish will still keep the cached object around but only for synchronous revalidation
@@ -624,7 +624,7 @@ func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 	// the revalidation request's response from the backend.
 	// Note that in this case we use "keep" instead of "grace" here to let Varnish
 	// revalidate synchronously.
-	assert.Equal(t, respB(http.StatusOK, "2", "foo"), reqR_B(t, port, "2"))
+	assert.Equal(t, respB(http.StatusOK, "2", "foo"), mkReq(t, port, "2", withStoreBody()))
 
 	// wait a tiny bit to see if we have the response still cached
 	time.Sleep(200 * time.Millisecond)
@@ -632,7 +632,7 @@ func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 	// send the third request which will be answered directly from the cache
 	// because the once stale response became fresh again after the second request,
 	// which successfully revalidated the cached object.
-	assert.Equal(t, respB(http.StatusOK, "2", "foo"), reqR_B(t, port, "3"))
+	assert.Equal(t, respB(http.StatusOK, "2", "foo"), mkReq(t, port, "3", withStoreBody()))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -684,7 +684,7 @@ func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	// send the first request which will be answered with 200 by the backend
 	// and cached for 1 second. The response will have an Etag header to
 	// enable conditional revalidation later.
-	assert.Equal(t, respB(http.StatusOK, "1", "foo"), reqR_B(t, port, "1"))
+	assert.Equal(t, respB(http.StatusOK, "1", "foo"), mkReq(t, port, "1", withStoreBody()))
 
 	// wait a bit for the response to become stale and enter the "keep" interval
 	// in which Varnish will still keep the cached object around but only for synchronous revalidation
@@ -696,7 +696,7 @@ func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	// the revalidation request's response from the backend.
 	// Note that in this case we use "keep" instead of "grace" here to let Varnish
 	// revalidate synchronously.
-	assert.Equal(t, respB(http.StatusOK, "2", "foo"), reqR_B(t, port, "2"))
+	assert.Equal(t, respB(http.StatusOK, "2", "foo"), mkReq(t, port, "2", withStoreBody()))
 
 	// wait a tiny bit to see if we have the response still cached
 	time.Sleep(200 * time.Millisecond)
@@ -704,7 +704,7 @@ func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	// send the third request which will be answered directly from the cache
 	// because the once stale response became fresh again after the second request,
 	// which successfully revalidated the cached object.
-	assert.Equal(t, respB(http.StatusOK, "2", "foo"), reqR_B(t, port, "3"))
+	assert.Equal(t, respB(http.StatusOK, "2", "foo"), mkReq(t, port, "3", withStoreBody()))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -734,7 +734,7 @@ func TestMaxAge0AndNoCacheInRequest(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request
-	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo").xResponse)
 
 	// wait a bit
 	time.Sleep(100 * time.Millisecond)
@@ -742,7 +742,7 @@ func TestMaxAge0AndNoCacheInRequest(t *testing.T) {
 	// send another request with "Cache-Control: max-age=0, no-cache" and expect the previous cached return
 	// because by default Varnish cannot be forced to revalidate with the backend based on the client's
 	// request headers.
-	assert.Equal(t, "foo", reqRCC(t, port, "bar", "max-age=0, no-cache").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "bar", withCacheControl("max-age=0, no-cache")).xResponse)
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -776,14 +776,14 @@ func TestClientConditionalRequestWithEtag(t *testing.T) {
 	waitForHealthy(t, port)
 
 	// send request
-	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo").xResponse)
 
 	// wait a bit
 	time.Sleep(100 * time.Millisecond)
 
 	// send another request with "If-None-Match: 12345" header and expect the previous cached return
 	// together with a 304 response code and no body.
-	assert.Equal(t, respB(http.StatusNotModified, "foo", ""), reqRINM(t, port, "bar", "12345"))
+	assert.Equal(t, respB(http.StatusNotModified, "foo", ""), mkReq(t, port, "bar", withIfNoneMatch("12345")))
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -819,7 +819,7 @@ func TestStaleWhileRevalidateWithoutDurationWhenZeroDefaultGrace(t *testing.T) {
 
 	// send request
 	time1 := time.Now()
-	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo").xResponse)
 	time2 := time.Now()
 	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
 
@@ -828,7 +828,7 @@ func TestStaleWhileRevalidateWithoutDurationWhenZeroDefaultGrace(t *testing.T) {
 
 	// send another request which should also hit the backend synchronously
 	time1 = time.Now()
-	assert.Equal(t, "bar", reqR(t, port, "bar").xResponse)
+	assert.Equal(t, "bar", mkReq(t, port, "bar").xResponse)
 	time2 = time.Now()
 	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
 
@@ -865,7 +865,7 @@ func TestStaleWhileRevalidateWithoutDurationWhenNonZeroDefaultGrace(t *testing.T
 
 	// send request
 	time1 := time.Now()
-	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo").xResponse)
 	time2 := time.Now()
 	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
 
@@ -875,7 +875,7 @@ func TestStaleWhileRevalidateWithoutDurationWhenNonZeroDefaultGrace(t *testing.T
 	// send another request which should respond immediately with the previously cached response
 	// and trigger an asynchronous revalidation due to the non-zero default grace which will be applied here.
 	time1 = time.Now()
-	assert.Equal(t, "foo", reqR(t, port, "bar").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "bar").xResponse)
 	time2 = time.Now()
 	assert.Less(t, time2.Sub(time1), 100*time.Millisecond)
 
@@ -916,7 +916,7 @@ func TestStaleWhileRevalidateZeroDoesNotMeanDefaultGrace(t *testing.T) {
 
 	// send request
 	time1 := time.Now()
-	assert.Equal(t, "foo", reqR(t, port, "foo").xResponse)
+	assert.Equal(t, "foo", mkReq(t, port, "foo").xResponse)
 	time2 := time.Now()
 	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
 
@@ -925,7 +925,7 @@ func TestStaleWhileRevalidateZeroDoesNotMeanDefaultGrace(t *testing.T) {
 
 	// send another request which should also hit the backend synchronously
 	time1 = time.Now()
-	assert.Equal(t, "bar", reqR(t, port, "bar").xResponse)
+	assert.Equal(t, "bar", mkReq(t, port, "bar").xResponse)
 	time2 = time.Now()
 	assert.Greater(t, time2.Sub(time1), 400*time.Millisecond)
 

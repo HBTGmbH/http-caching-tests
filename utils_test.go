@@ -13,6 +13,19 @@ import (
 	"time"
 )
 
+type request struct {
+	path          string
+	method        string
+	xStatusCode   int
+	xRequest      string
+	cacheControl  string
+	authorization string
+	cookie        string
+	ifNoneMatch   string
+	storeBody     bool
+	range_        string
+}
+
 type response struct {
 	statusCode   int
 	xResponse    string
@@ -20,6 +33,8 @@ type response struct {
 	cacheControl string
 	xCache       string
 	cacheStatus  string
+	contentRange string
+	acceptRanges string
 }
 
 func resp(statusCode int, xResponse string) response {
@@ -45,68 +60,102 @@ func respB(statusCode int, xResponse, body string) response {
 	}
 }
 
-func reqR(t *testing.T, port, xRequest string) response {
-	return req(t, port, "/", http.MethodGet, 0, xRequest, "", "", "", "", false)
+func mkReq(t *testing.T, port string, xRequest string, modifiers ...func(*request)) response {
+	r := request{
+		path:        "/",
+		method:      http.MethodGet,
+		xStatusCode: 200,
+		xRequest:    xRequest,
+	}
+	for _, m := range modifiers {
+		m(&r)
+	}
+	return req(t, port, r)
 }
 
-func reqPR(t *testing.T, port, path, xRequest string) response {
-	return req(t, port, path, http.MethodGet, 0, xRequest, "", "", "", "", false)
+func withPath(path string) func(*request) {
+	return func(r *request) {
+		r.path = path
+	}
 }
 
-func reqMR(t *testing.T, port, method, xRequest string) response {
-	return req(t, port, "/", method, 0, xRequest, "", "", "", "", false)
+func withMethod(method string) func(*request) {
+	return func(r *request) {
+		r.method = method
+	}
 }
 
-func reqRCC(t *testing.T, port, xRequest, cacheControl string) response {
-	return req(t, port, "/", http.MethodGet, 0, xRequest, cacheControl, "", "", "", false)
+func withCacheControl(cacheControl string) func(*request) {
+	return func(r *request) {
+		r.cacheControl = cacheControl
+	}
 }
 
-func reqR_B(t *testing.T, port, xRequest string) response {
-	return req(t, port, "/", http.MethodGet, 0, xRequest, "", "", "", "", true)
+func withStoreBody() func(*request) {
+	return func(r *request) {
+		r.storeBody = true
+	}
 }
 
-func reqRA(t *testing.T, port, xRequest, authorization string) response {
-	return req(t, port, "/", http.MethodGet, 0, xRequest, "", authorization, "", "", false)
+func withAuthorization(authorization string) func(*request) {
+	return func(r *request) {
+		r.authorization = authorization
+	}
 }
 
-func reqRC(t *testing.T, port, xRequest, cookie string) response {
-	return req(t, port, "/", http.MethodGet, 0, xRequest, "", "", cookie, "", false)
+func withCookie(cookie string) func(*request) {
+	return func(r *request) {
+		r.cookie = cookie
+	}
 }
 
-func reqSR(t *testing.T, port string, status int, xRequest string) response {
-	return req(t, port, "/", http.MethodGet, status, xRequest, "", "", "", "", false)
+func withXStatusCode(xStatusCode int) func(*request) {
+	return func(r *request) {
+		r.xStatusCode = xStatusCode
+	}
 }
 
-func reqRINM(t *testing.T, port, xRequest, ifNoneMatch string) response {
-	return req(t, port, "/", http.MethodGet, 0, xRequest, "", "", "", ifNoneMatch, true)
+func withIfNoneMatch(ifNoneMatch string) func(*request) {
+	return func(r *request) {
+		r.ifNoneMatch = ifNoneMatch
+	}
 }
 
-func req(t *testing.T, port, path, method string, status int, xRequest, cacheControl, authorization, cookie, ifNoneMatch string, storeBody bool) response {
+func withRange(range_ string) func(*request) {
+	return func(r *request) {
+		r.range_ = range_
+	}
+}
+
+func req(t *testing.T, port string, r request) response {
 	httpClient := http.Client{}
-	req, err := http.NewRequest(method, "http://localhost:"+port+path, nil)
-	if status != 0 {
-		req.Header.Set("X-Status-Code", strconv.Itoa(status))
+	req, err := http.NewRequest(r.method, "http://localhost:"+port+r.path, nil)
+	if r.xStatusCode != 0 {
+		req.Header.Set("X-Status-Code", strconv.Itoa(r.xStatusCode))
 	}
-	if xRequest != "" {
-		req.Header.Set("X-Request", xRequest)
+	if r.xRequest != "" {
+		req.Header.Set("X-Request", r.xRequest)
 	}
-	if authorization != "" {
-		req.Header.Set("Authorization", authorization)
+	if r.authorization != "" {
+		req.Header.Set("Authorization", r.authorization)
 	}
-	if cookie != "" {
-		req.Header.Set("Cookie", cookie)
+	if r.cookie != "" {
+		req.Header.Set("Cookie", r.cookie)
 	}
-	if cacheControl != "" {
-		req.Header.Set("Cache-Control", cacheControl)
+	if r.cacheControl != "" {
+		req.Header.Set("Cache-Control", r.cacheControl)
 	}
-	if ifNoneMatch != "" {
-		req.Header.Set("If-None-Match", ifNoneMatch)
+	if r.ifNoneMatch != "" {
+		req.Header.Set("If-None-Match", r.ifNoneMatch)
+	}
+	if r.range_ != "" {
+		req.Header.Set("Range", r.range_)
 	}
 	assert.NoError(t, err)
 	resp, err := httpClient.Do(req)
 	assert.NoError(t, err)
 	body := ""
-	if storeBody {
+	if r.storeBody {
 		body = readBody(t, resp)
 	}
 	return response{
@@ -116,6 +165,8 @@ func req(t *testing.T, port, path, method string, status int, xRequest, cacheCon
 		cacheControl: resp.Header.Get("Cache-Control"),
 		xCache:       resp.Header.Get("X-Cache"),
 		cacheStatus:  resp.Header.Get("Cache-Status"),
+		contentRange: resp.Header.Get("Content-Range"),
+		acceptRanges: resp.Header.Get("Accept-Ranges"),
 	}
 }
 

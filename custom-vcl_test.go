@@ -48,20 +48,20 @@ sub vcl_backend_response {
 	waitForHealthy(t, port)
 
 	// send request with a 200 response, which will be cached
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqSR(t, port, http.StatusOK, "foo"))
+	assert.Equal(t, resp(http.StatusOK, "foo"), mkReq(t, port, "foo", withXStatusCode(http.StatusOK)))
 
 	// wait half a second
 	time.Sleep(500 * time.Millisecond)
 
 	// send another request and expect the previous cached return
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "bar"))
+	assert.Equal(t, resp(http.StatusOK, "foo"), mkReq(t, port, "bar"))
 
 	// wait for 600 ms to let the cached response expire and enter grace period
 	time.Sleep(600 * time.Millisecond)
 
 	// send a request which will trigger a background/asynchronous revalidation
 	// request and result in a 500 response. We still get the 200 cached response here.
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqSR(t, port, http.StatusInternalServerError, "baz"))
+	assert.Equal(t, resp(http.StatusOK, "foo"), mkReq(t, port, "baz", withXStatusCode(http.StatusInternalServerError)))
 
 	// wait a bit for Varnish to finish the revalidation request. Normally, if we hadn't
 	// modified vcl_backend_response, this would now abandon the 200 cached response and
@@ -73,7 +73,7 @@ sub vcl_backend_response {
 	// This is because we abandoned the background request and still have a cached 200 response.
 	// Note that this request here will _also_ trigger a background revalidation request whose
 	// 500 response will then also be abandoned.
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqSR(t, port, http.StatusInternalServerError, "boo"))
+	assert.Equal(t, resp(http.StatusOK, "foo"), mkReq(t, port, "boo", withXStatusCode(http.StatusInternalServerError)))
 
 	// wait a bit for Varnish to finish the revalidation request.
 	time.Sleep(50 * time.Millisecond)
@@ -117,13 +117,13 @@ sub vcl_backend_response {
 	waitForHealthy(t, port)
 
 	// send request which will become a 500 response
-	assert.Equal(t, resp(http.StatusInternalServerError, "foo"), reqR(t, port, "foo"))
+	assert.Equal(t, resp(http.StatusInternalServerError, "foo"), mkReq(t, port, "foo"))
 
 	// wait a tiny bit
 	time.Sleep(100 * time.Millisecond)
 
 	// send another request and expect the previous cached return
-	assert.Equal(t, resp(http.StatusInternalServerError, "foo"), reqR(t, port, "bar"))
+	assert.Equal(t, resp(http.StatusInternalServerError, "foo"), mkReq(t, port, "bar"))
 
 	// expect one backend request
 	// If beresp.uncacheable would have been set to true, we would have gotten a Hit-For-Miss object
@@ -164,13 +164,13 @@ sub vcl_backend_response {
 	waitForHealthy(t, port)
 
 	// send request which will become a 500 response
-	assert.Equal(t, resp(http.StatusInternalServerError, "foo"), reqR(t, port, "foo"))
+	assert.Equal(t, resp(http.StatusInternalServerError, "foo"), mkReq(t, port, "foo"))
 
 	// wait a tiny bit
 	time.Sleep(100 * time.Millisecond)
 
 	// send another request and expect a new backend request because of Hit-For-Miss
-	assert.Equal(t, resp(http.StatusInternalServerError, "bar"), reqR(t, port, "bar"))
+	assert.Equal(t, resp(http.StatusInternalServerError, "bar"), mkReq(t, port, "bar"))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -202,13 +202,13 @@ sub vcl_backend_response {
 	defer stopFunc()
 	waitForHealthy(t, port)
 
-	assert.Equal(t, respCC(http.StatusOK, "", "s-maxage=10"), reqPR(t, port, "/1", "s-maxage=10, stale-while-revalidate"))
-	assert.Equal(t, respCC(http.StatusOK, "", "public, s-maxage=10"), reqPR(t, port, "/2", "public, s-maxage=10, stale-while-revalidate"))
-	assert.Equal(t, respCC(http.StatusOK, "", "s-maxage=10, public"), reqPR(t, port, "/3", "s-maxage=10, stale-while-revalidate, public"))
-	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate=10, public"), reqPR(t, port, "/4", "stale-while-revalidate=10, public"))
-	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate=10"), reqPR(t, port, "/5", "stale-while-revalidate=10"))
-	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate = 10"), reqPR(t, port, "/6", "stale-while-revalidate = 10"))
-	assert.Equal(t, respCC(http.StatusOK, "", ""), reqPR(t, port, "/7", "stale-while-revalidate"))
+	assert.Equal(t, respCC(http.StatusOK, "", "s-maxage=10"), mkReq(t, port, "s-maxage=10, stale-while-revalidate", withPath("/1")))
+	assert.Equal(t, respCC(http.StatusOK, "", "public, s-maxage=10"), mkReq(t, port, "public, s-maxage=10, stale-while-revalidate", withPath("/2")))
+	assert.Equal(t, respCC(http.StatusOK, "", "s-maxage=10, public"), mkReq(t, port, "s-maxage=10, stale-while-revalidate, public", withPath("/3")))
+	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate=10, public"), mkReq(t, port, "stale-while-revalidate=10, public", withPath("/4")))
+	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate=10"), mkReq(t, port, "stale-while-revalidate=10", withPath("/5")))
+	assert.Equal(t, respCC(http.StatusOK, "", "stale-while-revalidate = 10"), mkReq(t, port, "stale-while-revalidate = 10", withPath("/6")))
+	assert.Equal(t, respCC(http.StatusOK, "", ""), mkReq(t, port, "stale-while-revalidate", withPath("/7")))
 }
 
 // TestReturnPassInVclRecvBypassesTheCache tests that returning pass in vcl_recv bypasses the cache.
@@ -241,13 +241,13 @@ sub vcl_recv {
 	waitForHealthy(t, port)
 
 	// send first request which will be passed through to the backend
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "foo"))
+	assert.Equal(t, resp(http.StatusOK, "foo"), mkReq(t, port, "foo"))
 
 	// wait a bit (for no reason, really)
 	time.Sleep(100 * time.Millisecond)
 
 	// send another request and expect a new backend request because
-	assert.Equal(t, resp(http.StatusOK, "foo"), reqR(t, port, "foo"))
+	assert.Equal(t, resp(http.StatusOK, "foo"), mkReq(t, port, "foo"))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -286,19 +286,19 @@ sub vcl_backend_response {
 	waitForHealthy(t, port)
 
 	// send first request which should get a grace of only 1s
-	assert.Equal(t, respCC(http.StatusOK, "foo", ""), reqR(t, port, "foo"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", ""), mkReq(t, port, "foo"))
 
 	// wait for the response to become stale but still within grace
 	time.Sleep(200 * time.Millisecond)
 
 	// send another request and expect a cached response and an asynchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "foo", ""), reqR(t, port, "bar"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", ""), mkReq(t, port, "bar"))
 
 	// wait to get outside of grace, which should only have been 1s
 	time.Sleep(1200 * time.Millisecond)
 
 	// send another request and expect a synchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "buzz", ""), reqR(t, port, "buzz"))
+	assert.Equal(t, respCC(http.StatusOK, "buzz", ""), mkReq(t, port, "buzz"))
 
 	// expect three backend requests
 	assert.Equal(t, 3, backendRequests)
@@ -333,19 +333,19 @@ sub vcl_recv {
 	waitForHealthy(t, port)
 
 	// send first request which should get a grace of only 1s
-	assert.Equal(t, respCC(http.StatusOK, "foo", "max-age=1, stale-while-revalidate=10"), reqR(t, port, "foo"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", "max-age=1, stale-while-revalidate=10"), mkReq(t, port, "foo"))
 
 	// wait for the response to become stale but still within grace
 	time.Sleep(1200 * time.Millisecond)
 
 	// send another request and expect a cached response and an asynchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "foo", "max-age=1, stale-while-revalidate=10"), reqR(t, port, "bar"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", "max-age=1, stale-while-revalidate=10"), mkReq(t, port, "bar"))
 
 	// wait to get outside of grace, which should only have been 1s
 	time.Sleep(2200 * time.Millisecond)
 
 	// send another request and expect a synchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "buzz", "max-age=1, stale-while-revalidate=10"), reqR(t, port, "buzz"))
+	assert.Equal(t, respCC(http.StatusOK, "buzz", "max-age=1, stale-while-revalidate=10"), mkReq(t, port, "buzz"))
 
 	// expect three backend requests
 	assert.Equal(t, 3, backendRequests)
@@ -381,13 +381,13 @@ sub vcl_backend_response {
 	waitForHealthy(t, port)
 
 	// send first request which should get a TTL of 10s
-	assert.Equal(t, respCC(http.StatusOK, "foo", ""), reqR(t, port, "foo"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", ""), mkReq(t, port, "foo"))
 
 	// wait a bit
 	time.Sleep(100 * time.Millisecond)
 
 	// send another request and expect the cached response (because req.ttl is NO upper cap for beresp.ttl)
-	assert.Equal(t, respCC(http.StatusOK, "foo", ""), reqR(t, port, "bar"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", ""), mkReq(t, port, "bar"))
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -429,19 +429,19 @@ sub vcl_backend_response {
 	waitForHealthy(t, port)
 
 	// send first request should get a grace of 1s
-	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), reqR(t, port, "foo"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), mkReq(t, port, "foo"))
 
 	// wait a bit but still within grace
 	time.Sleep(200 * time.Millisecond)
 
 	// send another request and expect a cached response and an asynchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), reqR(t, port, "bar"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", "stale-while-revalidate=1"), mkReq(t, port, "bar"))
 
 	// wait to get outside of grace
 	time.Sleep(1100 * time.Millisecond)
 
 	// send another request and expect a synchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "buzz", "stale-while-revalidate=1"), reqR(t, port, "buzz"))
+	assert.Equal(t, respCC(http.StatusOK, "buzz", "stale-while-revalidate=1"), mkReq(t, port, "buzz"))
 
 	// expect three backend requests
 	assert.Equal(t, 3, backendRequests)
@@ -482,19 +482,19 @@ sub vcl_backend_response {
 	waitForHealthy(t, port)
 
 	// send first request
-	assert.Equal(t, respCC(http.StatusOK, "foo", "private, stale-while-revalidate=1"), reqR(t, port, "foo"))
+	assert.Equal(t, respCC(http.StatusOK, "foo", "private, stale-while-revalidate=1"), mkReq(t, port, "foo"))
 
 	// wait a bit
 	time.Sleep(200 * time.Millisecond)
 
 	// send another request and expect a new synchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "bar", "private, stale-while-revalidate=1"), reqR(t, port, "bar"))
+	assert.Equal(t, respCC(http.StatusOK, "bar", "private, stale-while-revalidate=1"), mkReq(t, port, "bar"))
 
 	// wait to get outside of supposed grace period
 	time.Sleep(1100 * time.Millisecond)
 
 	// send another request and also expect a synchronous backend request
-	assert.Equal(t, respCC(http.StatusOK, "buzz", "private, stale-while-revalidate=1"), reqR(t, port, "buzz"))
+	assert.Equal(t, respCC(http.StatusOK, "buzz", "private, stale-while-revalidate=1"), mkReq(t, port, "buzz"))
 
 	// expect three backend requests
 	assert.Equal(t, 3, backendRequests)
@@ -541,15 +541,15 @@ sub vcl_recv {
 	defer stopFunc()
 	waitForHealthy(t, port)
 
-	reqRC(t, port, "__prerender_bypass=1", "__prerender_bypass=1")
-	reqRC(t, port, "__n-p-d=1", "__n-p-d=1")
-	reqRC(t, port, "", "")
-	reqRC(t, port, "", "foo=bar")
-	reqRC(t, port, "__prerender_bypass=1", "foo=bar; __prerender_bypass=1")
-	reqRC(t, port, "__n-p-d=1", "foo=bar; __n-p-d=1")
-	reqRC(t, port, "__prerender_bypass=1", "__prerender_bypass=1; foo=bar")
-	reqRC(t, port, "__prerender_bypass=1", "a=b=3; __prerender_bypass=1; foo=bar=2")
-	reqRC(t, port, "", "a=b=3; foo=bar=2; c=3")
+	mkReq(t, port, "__prerender_bypass=1", withCookie("__prerender_bypass=1"))
+	mkReq(t, port, "__n-p-d=1", withCookie("__n-p-d=1"))
+	mkReq(t, port, "", withCookie(""))
+	mkReq(t, port, "", withCookie("foo=bar"))
+	mkReq(t, port, "__prerender_bypass=1", withCookie("foo=bar; __prerender_bypass=1"))
+	mkReq(t, port, "__n-p-d=1", withCookie("foo=bar; __n-p-d=1"))
+	mkReq(t, port, "__prerender_bypass=1", withCookie("__prerender_bypass=1; foo=bar"))
+	mkReq(t, port, "__prerender_bypass=1", withCookie("a=b=3; __prerender_bypass=1; foo=bar=2"))
+	mkReq(t, port, "", withCookie("a=b=3; foo=bar=2; c=3"))
 }
 
 // TestSetXCacheResponseHeaderOnHitOrMiss tests whether vcl_hit and vcl_miss are called appropriately
@@ -598,7 +598,7 @@ sub vcl_deliver {
 		xResponse:    "foo",
 		xCache:       "miss",
 		cacheControl: "max-age=1, stale-while-revalidate=1",
-	}, reqR(t, port, "foo"))
+	}, mkReq(t, port, "foo"))
 
 	// do the second request, which will be a hit due to being within TTL
 	assert.Equal(t, response{
@@ -606,7 +606,7 @@ sub vcl_deliver {
 		xResponse:    "foo",
 		xCache:       "hit",
 		cacheControl: "max-age=1, stale-while-revalidate=1",
-	}, reqR(t, port, "bar"))
+	}, mkReq(t, port, "bar"))
 
 	// wait for being out of TTL
 	time.Sleep(1100 * time.Millisecond)
@@ -617,7 +617,7 @@ sub vcl_deliver {
 		xResponse:    "foo",
 		xCache:       "hit",
 		cacheControl: "max-age=1, stale-while-revalidate=1",
-	}, reqR(t, port, "baz"))
+	}, mkReq(t, port, "baz"))
 
 	// wait a bit for background refresh
 	time.Sleep(100 * time.Millisecond)
@@ -632,7 +632,7 @@ sub vcl_deliver {
 		xResponse:    "foobarbaz",
 		xCache:       "miss",
 		cacheControl: "max-age=1, stale-while-revalidate=1",
-	}, reqR(t, port, "foobarbaz"))
+	}, mkReq(t, port, "foobarbaz"))
 }
 
 func TestRfc9211CacheStatusImplementation(t *testing.T) {
@@ -684,42 +684,42 @@ sub vcl_deliver {
 		statusCode:  200,
 		xResponse:   "foo",
 		cacheStatus: "my-cache; fwd=method; detail=POST",
-	}, reqMR(t, port, http.MethodPost, "foo"))
+	}, mkReq(t, port, "foo", withMethod(http.MethodPost)))
 
 	// forward because of PUT method
 	assert.Equal(t, response{
 		statusCode:  200,
 		xResponse:   "bar",
 		cacheStatus: "my-cache; fwd=method; detail=PUT",
-	}, reqMR(t, port, http.MethodPut, "bar"))
+	}, mkReq(t, port, "bar", withMethod(http.MethodPut)))
 
 	// forward because of Authorization header
 	assert.Equal(t, response{
 		statusCode:  200,
 		xResponse:   "baz",
 		cacheStatus: "my-cache; fwd=bypass; detail=AUTHORIZATION",
-	}, req(t, port, "/", http.MethodGet, 200, "baz", "", "Bearer Test", "", "", false))
+	}, mkReq(t, port, "baz", withAuthorization("Bearer Test")))
 
 	// forward because of Cookie header
 	assert.Equal(t, response{
 		statusCode:  200,
 		xResponse:   "foobar",
 		cacheStatus: "my-cache; fwd=bypass; detail=COOKIE",
-	}, req(t, port, "/", http.MethodGet, 200, "foobar", "", "", "myCookieValue=3", "", false))
+	}, mkReq(t, port, "foobar", withCookie("myCookieValue=3")))
 
 	// miss because no object in cache
 	assert.Equal(t, response{
 		statusCode:  200,
 		xResponse:   "foobaz",
 		cacheStatus: "my-cache; fwd=miss",
-	}, reqR(t, port, "foobaz"))
+	}, mkReq(t, port, "foobaz"))
 
 	// hit to cached object of previous request
 	assert.Equal(t, response{
 		statusCode:  200,
 		xResponse:   "foobaz",
 		cacheStatus: "my-cache; hit",
-	}, reqR(t, port, "barbaz"))
+	}, mkReq(t, port, "barbaz"))
 }
 
 // TestDeliverInVclRecvMeansNonZeroObjTtlInVclDeliver tests that obj.ttl in vcl_deliver will
@@ -754,7 +754,7 @@ sub vcl_deliver {
 	defer stopFunc()
 	waitForHealthy(t, port)
 
-	resp := reqR(t, port, "")
+	resp := mkReq(t, port, "")
 	xResponseAsFloat, err := strconv.ParseFloat(resp.xResponse, 32)
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.statusCode)
@@ -796,7 +796,7 @@ sub vcl_deliver {
 	defer stopFunc()
 	waitForHealthy(t, port)
 
-	resp := reqR(t, port, "")
+	resp := mkReq(t, port, "")
 	xResponseAsFloat, err := strconv.ParseFloat(resp.xResponse, 32)
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.statusCode)
