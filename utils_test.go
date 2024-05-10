@@ -37,29 +37,6 @@ type response struct {
 	acceptRanges string
 }
 
-func resp(statusCode int, xResponse string) response {
-	return response{
-		statusCode: statusCode,
-		xResponse:  xResponse,
-	}
-}
-
-func respCC(statusCode int, xResponse string, cacheControl string) response {
-	return response{
-		statusCode:   statusCode,
-		xResponse:    xResponse,
-		cacheControl: cacheControl,
-	}
-}
-
-func respB(statusCode int, xResponse, body string) response {
-	return response{
-		statusCode: statusCode,
-		xResponse:  xResponse,
-		body:       body,
-	}
-}
-
 func mkReq(t *testing.T, port string, xRequest string, modifiers ...func(*request)) response {
 	r := request{
 		path:        "/",
@@ -71,6 +48,51 @@ func mkReq(t *testing.T, port string, xRequest string, modifiers ...func(*reques
 		m(&r)
 	}
 	return req(t, port, r)
+}
+
+func mkResp(statusCode int, xResponse string, modifiers ...func(*response)) response {
+	r := response{
+		statusCode: statusCode,
+		xResponse:  xResponse,
+	}
+	if statusCode == http.StatusOK || statusCode == http.StatusNotModified {
+		// Varnish always responds with Accept-Ranges: bytes for 200 or 304 responses
+		r.acceptRanges = "bytes"
+	}
+	for _, m := range modifiers {
+		m(&r)
+	}
+	return r
+}
+
+func withCacheStatus(cacheStatus string) func(*response) {
+	return func(r *response) {
+		r.cacheStatus = cacheStatus
+	}
+}
+
+func withAcceptRanges(acceptRanges string) func(*response) {
+	return func(r *response) {
+		r.acceptRanges = acceptRanges
+	}
+}
+
+func withBody(body string) func(*response) {
+	return func(r *response) {
+		r.body = body
+	}
+}
+
+func withResponseCacheControl(cacheControl string) func(*response) {
+	return func(r *response) {
+		r.cacheControl = cacheControl
+	}
+}
+
+func withXCache(xCache string) func(*response) {
+	return func(r *response) {
+		r.xCache = xCache
+	}
 }
 
 func withPath(path string) func(*request) {

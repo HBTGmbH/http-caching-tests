@@ -38,7 +38,7 @@ sub vcl_backend_error {
 	waitForHealthy(t, port)
 
 	// send request
-	assert.Equal(t, respB(http.StatusServiceUnavailable, "foo", ""), mkReq(t, port, "foo", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusServiceUnavailable, "foo", withBody("")), mkReq(t, port, "foo", withStoreBody()))
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -73,5 +73,5 @@ sub vcl_backend_error {
 	testServer.Close()
 
 	// send request
-	assert.Equal(t, respB(http.StatusServiceUnavailable, "", "ERROR: 503 Backend fetch failed"), mkReq(t, port, "foo", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusServiceUnavailable, "", withBody("ERROR: 503 Backend fetch failed")), mkReq(t, port, "foo", withStoreBody()))
 }
