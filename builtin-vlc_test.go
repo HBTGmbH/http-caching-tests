@@ -933,7 +933,7 @@ func TestStaleWhileRevalidateZeroDoesNotMeanDefaultGrace(t *testing.T) {
 	assert.Equal(t, 2, backendRequests)
 }
 
-// TestStaleWhileRevalidateWithZeroDuration tests that Varnish will do a non-ranged request to the backend when
+// TestRangeRequestIsAlwaysNonRangedForBackend tests that Varnish will do a non-ranged request to the backend when
 // the client sends a ranged request (i.e. with request header "Range").
 func TestRangeRequestIsAlwaysNonRangedForBackend(t *testing.T) {
 	t.Parallel()
