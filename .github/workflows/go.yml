@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      DOCKER_API_VERSION: 1.43
     steps:
     - uses: actions/checkout@v3
     - name: Set up Go
