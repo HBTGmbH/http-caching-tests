@@ -932,3 +932,38 @@ func TestStaleWhileRevalidateZeroDoesNotMeanDefaultGrace(t *testing.T) {
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
 }
+
+// TestStaleWhileRevalidateWithZeroDuration tests that Varnish will do a non-ranged request to the backend when
+// the client sends a ranged request (i.e. with request header "Range").
+func TestRangeRequestIsAlwaysNonRangedForBackend(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("Range"))
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.Header().Set("Cache-Control", "max-age=100")
+		w.WriteHeader(http.StatusOK)
+		backendRequests++
+		_, _ = w.Write([]byte("foo"))
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send first range request to varnish and expect an Accept-Ranges header with "bytes"
+	assert.Equal(t, "bytes", mkReq(t, port, "1").acceptRanges)
+
+	// send a range request and expect to receive a cached response
+	assert.Equal(t, "1", mkReq(t, port, "2", withRange("bytes=0..")).xResponse)
+
+	// expect one backend request
+	assert.Equal(t, 1, backendRequests)
+}
