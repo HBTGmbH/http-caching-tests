@@ -23,18 +23,20 @@ type request struct {
 	cookie        string
 	ifNoneMatch   string
 	storeBody     bool
+	origin        string
 	range_        string
 }
 
 type response struct {
-	statusCode   int
-	xResponse    string
-	body         string
-	cacheControl string
-	xCache       string
-	cacheStatus  string
-	contentRange string
-	acceptRanges string
+	statusCode               int
+	xResponse                string
+	body                     string
+	cacheControl             string
+	xCache                   string
+	cacheStatus              string
+	contentRange             string
+	acceptRanges             string
+	accessControlAllowOrigin string
 }
 
 func mkReq(t *testing.T, port string, xRequest string, modifiers ...func(*request)) response {
@@ -113,6 +115,12 @@ func withCacheControl(cacheControl string) func(*request) {
 	}
 }
 
+func withOrigin(origin string) func(*request) {
+	return func(r *request) {
+		r.origin = origin
+	}
+}
+
 func withStoreBody() func(*request) {
 	return func(r *request) {
 		r.storeBody = true
@@ -167,6 +175,9 @@ func req(t *testing.T, port string, r request) response {
 	if r.cacheControl != "" {
 		req.Header.Set("Cache-Control", r.cacheControl)
 	}
+	if r.origin != "" {
+		req.Header.Set("Origin", r.origin)
+	}
 	if r.ifNoneMatch != "" {
 		req.Header.Set("If-None-Match", r.ifNoneMatch)
 	}
@@ -181,14 +192,15 @@ func req(t *testing.T, port string, r request) response {
 		body = readBody(t, resp)
 	}
 	return response{
-		statusCode:   resp.StatusCode,
-		xResponse:    resp.Header.Get("X-Response"),
-		body:         body,
-		cacheControl: resp.Header.Get("Cache-Control"),
-		xCache:       resp.Header.Get("X-Cache"),
-		cacheStatus:  resp.Header.Get("Cache-Status"),
-		contentRange: resp.Header.Get("Content-Range"),
-		acceptRanges: resp.Header.Get("Accept-Ranges"),
+		statusCode:               resp.StatusCode,
+		xResponse:                resp.Header.Get("X-Response"),
+		body:                     body,
+		cacheControl:             resp.Header.Get("Cache-Control"),
+		xCache:                   resp.Header.Get("X-Cache"),
+		cacheStatus:              resp.Header.Get("Cache-Status"),
+		contentRange:             resp.Header.Get("Content-Range"),
+		acceptRanges:             resp.Header.Get("Accept-Ranges"),
+		accessControlAllowOrigin: resp.Header.Get("Access-Control-Allow-Origin"),
 	}
 }
 

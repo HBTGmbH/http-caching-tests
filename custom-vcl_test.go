@@ -768,3 +768,51 @@ sub vcl_deliver {
 	assert.Equal(t, 200, resp.statusCode)
 	assert.Equal(t, 0.0, xResponseAsFloat)
 }
+
+// TestVaryOnOrigin checks that Varnish behaves properly when adding a custom Vary response header
+// in vcl_backend_response, such that further requests will not be served from the cache when
+// the request header value mentioned previously in Vary is different.
+func TestVaryOnOrigin(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		backendRequests++
+		w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+		w.Header().Set("Cache-Control", "max-age=300, stale-while-revalidate=30")
+		w.Header().Set("Vary", "Accept-Encoding")
+		w.WriteHeader(http.StatusOK)
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+sub vcl_backend_response {
+  if (beresp.http.Access-Control-Allow-Origin || beresp.http.Access-Control-Allow-Credentials ||
+      beresp.http.Access-Control-Expose-Headers || beresp.http.Access-Control-Max-Age ||
+      beresp.http.Access-Control-Allow-Methods || beresp.http.Access-Control-Allow-Headers) {
+    # If there wasn't a Vary header already, we must add it.
+    if (!beresp.http.Vary) {
+      set beresp.http.Vary = "Origin";
+    } else if (beresp.http.Vary !~ "Origin") {
+      set beresp.http.Vary = beresp.http.Vary + ", Origin";
+    }
+  }
+}
+`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	resp := mkReq(t, port, "", withOrigin("https://a"))
+	assert.Equal(t, "https://a", resp.accessControlAllowOrigin)
+
+	resp = mkReq(t, port, "", withOrigin("https://b"))
+	assert.Equal(t, "https://b", resp.accessControlAllowOrigin)
+
+	assert.Equal(t, 2, backendRequests)
+}
