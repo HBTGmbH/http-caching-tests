@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"io"
@@ -15,7 +15,7 @@ import (
 
 var cli *client.Client
 
-const varnishImage = "varnish:7.5.0-alpine"
+const varnishImage = "varnish:7.6.1-alpine"
 
 type VarnishConfig struct {
 	BackendPort  string
@@ -32,7 +32,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	reader, err := cli.ImagePull(context.Background(), varnishImage, types.ImagePullOptions{})
+	reader, err := cli.ImagePull(context.Background(), varnishImage, image.PullOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -173,3 +173,4 @@ func withDefault(s string, defaultValue string) string {
 	}
 	return s
 }
+
