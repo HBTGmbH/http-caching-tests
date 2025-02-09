@@ -14,17 +14,18 @@ import (
 )
 
 type request struct {
-	path          string
-	method        string
-	xStatusCode   int
-	xRequest      string
-	cacheControl  string
-	authorization string
-	cookie        string
-	ifNoneMatch   string
-	storeBody     bool
-	origin        string
-	range_        string
+	path           string
+	method         string
+	xStatusCode    int
+	xRequest       string
+	cacheControl   string
+	authorization  string
+	cookie         string
+	ifNoneMatch    string
+	acceptEncoding string
+	storeBody      bool
+	origin         string
+	range_         string
 }
 
 type response struct {
@@ -36,6 +37,10 @@ type response struct {
 	cacheStatus              string
 	contentRange             string
 	acceptRanges             string
+	contentType              string
+	transferEncoding         string
+	contentEncoding          string
+	contentLength            int
 	accessControlAllowOrigin string
 }
 
@@ -79,6 +84,12 @@ func withAcceptRanges(acceptRanges string) func(*response) {
 	}
 }
 
+func withContentType(contentType string) func(*response) {
+	return func(r *response) {
+		r.contentType = contentType
+	}
+}
+
 func withBody(body string) func(*response) {
 	return func(r *response) {
 		r.body = body
@@ -94,6 +105,12 @@ func withResponseCacheControl(cacheControl string) func(*response) {
 func withXCache(xCache string) func(*response) {
 	return func(r *response) {
 		r.xCache = xCache
+	}
+}
+
+func withContentLength(contentLength int) func(*response) {
+	return func(r *response) {
+		r.contentLength = contentLength
 	}
 }
 
@@ -124,6 +141,12 @@ func withOrigin(origin string) func(*request) {
 func withStoreBody() func(*request) {
 	return func(r *request) {
 		r.storeBody = true
+	}
+}
+
+func withAcceptEncoding(acceptEncoding string) func(*request) {
+	return func(r *request) {
+		r.acceptEncoding = acceptEncoding
 	}
 }
 
@@ -158,7 +181,11 @@ func withRange(range_ string) func(*request) {
 }
 
 func req(t *testing.T, port string, r request) response {
-	httpClient := http.Client{}
+	httpClient := http.Client{
+		Transport: &http.Transport{
+			DisableCompression: true,
+		},
+	}
 	req, err := http.NewRequest(r.method, "http://localhost:"+port+r.path, nil)
 	if r.xStatusCode != 0 {
 		req.Header.Set("X-Status-Code", strconv.Itoa(r.xStatusCode))
@@ -184,12 +211,19 @@ func req(t *testing.T, port string, r request) response {
 	if r.range_ != "" {
 		req.Header.Set("Range", r.range_)
 	}
+	if r.acceptEncoding != "" {
+		req.Header.Set("Accept-Encoding", r.acceptEncoding)
+	}
 	assert.NoError(t, err)
 	resp, err := httpClient.Do(req)
 	assert.NoError(t, err)
 	body := ""
 	if r.storeBody {
 		body = readBody(t, resp)
+	}
+	transferEncoding := ""
+	if len(resp.TransferEncoding) > 0 {
+		transferEncoding = resp.TransferEncoding[0]
 	}
 	return response{
 		statusCode:               resp.StatusCode,
@@ -199,6 +233,10 @@ func req(t *testing.T, port string, r request) response {
 		xCache:                   resp.Header.Get("X-Cache"),
 		cacheStatus:              resp.Header.Get("Cache-Status"),
 		contentRange:             resp.Header.Get("Content-Range"),
+		contentType:              resp.Header.Get("Content-Type"),
+		contentEncoding:          resp.Header.Get("Content-Encoding"),
+		contentLength:            int(resp.ContentLength),
+		transferEncoding:         transferEncoding,
 		acceptRanges:             resp.Header.Get("Accept-Ranges"),
 		accessControlAllowOrigin: resp.Header.Get("Access-Control-Allow-Origin"),
 	}

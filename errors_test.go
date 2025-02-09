@@ -18,6 +18,7 @@ func Test503FromBackendIsNotVclBackendError(t *testing.T) {
 	// start a test server
 	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		backendRequests++
 	})
@@ -38,7 +39,8 @@ sub vcl_backend_error {
 	waitForHealthy(t, port)
 
 	// send request
-	assert.Equal(t, mkResp(http.StatusServiceUnavailable, "foo", withBody("")), mkReq(t, port, "foo", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusServiceUnavailable, "foo", withBody(""),
+		withContentType("text/html; charset=utf-8")), mkReq(t, port, "foo", withStoreBody()))
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -73,5 +75,9 @@ sub vcl_backend_error {
 	testServer.Close()
 
 	// send request
-	assert.Equal(t, mkResp(http.StatusServiceUnavailable, "", withBody("ERROR: 503 Backend fetch failed")), mkReq(t, port, "foo", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusServiceUnavailable, "",
+		withBody("ERROR: 503 Backend fetch failed"),
+		withContentType(""),
+		withContentLength(31),
+	), mkReq(t, port, "foo", withStoreBody()))
 }

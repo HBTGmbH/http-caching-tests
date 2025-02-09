@@ -562,7 +562,9 @@ func TestBackendRespondsWith304WhenUnconditionalRequest(t *testing.T) {
 	// send request which will be answered with 304 by the backend
 	// but Varnish will return 503 to the client, because the backend
 	// responding with a 304 for an unconditional request is an error.
-	assert.Equal(t, mkResp(http.StatusServiceUnavailable, ""), mkReq(t, port, "foo"))
+	assert.Equal(t, mkResp(http.StatusServiceUnavailable, "",
+		withContentType("text/html; charset=utf-8"),
+		withContentLength(282)), mkReq(t, port, "foo"))
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
@@ -612,7 +614,9 @@ func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 	// send the first request which will be answered with 200 by the backend
 	// and cached for 1 second. The response will have an Etag header to
 	// enable conditional revalidation later.
-	assert.Equal(t, mkResp(http.StatusOK, "1", withBody("foo")), mkReq(t, port, "1", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusOK, "1", withBody("foo"),
+		withContentType("text/plain; charset=utf-8"),
+		withContentLength(3)), mkReq(t, port, "1", withStoreBody()))
 
 	// wait a bit for the response to become stale and enter the "keep" interval
 	// in which Varnish will still keep the cached object around but only for synchronous revalidation
@@ -624,7 +628,9 @@ func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 	// the revalidation request's response from the backend.
 	// Note that in this case we use "keep" instead of "grace" here to let Varnish
 	// revalidate synchronously.
-	assert.Equal(t, mkResp(http.StatusOK, "2", withBody("foo")), mkReq(t, port, "2", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusOK, "2", withBody("foo"),
+		withContentType("text/plain; charset=utf-8"),
+		withContentLength(3)), mkReq(t, port, "2", withStoreBody()))
 
 	// wait a tiny bit to see if we have the response still cached
 	time.Sleep(200 * time.Millisecond)
@@ -632,7 +638,9 @@ func TestConditionalRequestWhenRevalidatingWithEtag(t *testing.T) {
 	// send the third request which will be answered directly from the cache
 	// because the once stale response became fresh again after the second request,
 	// which successfully revalidated the cached object.
-	assert.Equal(t, mkResp(http.StatusOK, "2", withBody("foo")), mkReq(t, port, "3", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusOK, "2", withBody("foo"),
+		withContentType("text/plain; charset=utf-8"),
+		withContentLength(3)), mkReq(t, port, "3", withStoreBody()))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -684,7 +692,9 @@ func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	// send the first request which will be answered with 200 by the backend
 	// and cached for 1 second. The response will have an Etag header to
 	// enable conditional revalidation later.
-	assert.Equal(t, mkResp(http.StatusOK, "1", withBody("foo")), mkReq(t, port, "1", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusOK, "1", withBody("foo"),
+		withContentType("text/plain; charset=utf-8"),
+		withContentLength(3)), mkReq(t, port, "1", withStoreBody()))
 
 	// wait a bit for the response to become stale and enter the "keep" interval
 	// in which Varnish will still keep the cached object around but only for synchronous revalidation
@@ -696,7 +706,9 @@ func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	// the revalidation request's response from the backend.
 	// Note that in this case we use "keep" instead of "grace" here to let Varnish
 	// revalidate synchronously.
-	assert.Equal(t, mkResp(http.StatusOK, "2", withBody("foo")), mkReq(t, port, "2", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusOK, "2", withBody("foo"),
+		withContentType("text/plain; charset=utf-8"),
+		withContentLength(3)), mkReq(t, port, "2", withStoreBody()))
 
 	// wait a tiny bit to see if we have the response still cached
 	time.Sleep(200 * time.Millisecond)
@@ -704,7 +716,9 @@ func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 	// send the third request which will be answered directly from the cache
 	// because the once stale response became fresh again after the second request,
 	// which successfully revalidated the cached object.
-	assert.Equal(t, mkResp(http.StatusOK, "2", withBody("foo")), mkReq(t, port, "3", withStoreBody()))
+	assert.Equal(t, mkResp(http.StatusOK, "2", withBody("foo"),
+		withContentType("text/plain; charset=utf-8"),
+		withContentLength(3)), mkReq(t, port, "3", withStoreBody()))
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
@@ -783,7 +797,8 @@ func TestClientConditionalRequestWithEtag(t *testing.T) {
 
 	// send another request with "If-None-Match: 12345" header and expect the previous cached return
 	// together with a 304 response code and no body.
-	assert.Equal(t, mkResp(http.StatusNotModified, "foo", withBody("")), mkReq(t, port, "bar", withIfNoneMatch("12345")))
+	assert.Equal(t, mkResp(http.StatusNotModified, "foo", withBody(""),
+		withContentType("text/plain; charset=utf-8")), mkReq(t, port, "bar", withIfNoneMatch("12345")))
 
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)

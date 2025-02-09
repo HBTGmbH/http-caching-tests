@@ -816,3 +816,105 @@ sub vcl_backend_response {
 
 	assert.Equal(t, 2, backendRequests)
 }
+
+// TestDoGzipWhenGetAndCacheableAndAcceptEncodingGzip checks that Varnish will
+// do gzip compression when the backend did not do it when using beresp.do_gzip.
+func TestDoGzipWhenGetAndCacheableAndAcceptEncodingGzip(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		oneThousandBytes := make([]byte, 1024)
+		w.Header().Set("Cache-Control", "max-age=1")
+		w.WriteHeader(http.StatusOK)
+		w.Write(oneThousandBytes)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+import std;
+sub vcl_miss {
+  set req.http.x-cache = "miss";
+}
+sub vcl_deliver {
+  set resp.http.x-cache = req.http.x-cache;
+}
+sub vcl_backend_response {
+  set beresp.do_gzip = true;
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request which will become a 500 response
+	resp := mkReq(t, port, "foo", withStoreBody(), withAcceptEncoding("gzip"))
+
+	if resp.transferEncoding == "chunked" {
+		assert.Equal(t, -1, resp.contentLength) // <- because of chunked encoding
+	} else {
+		assert.Equal(t, 29, resp.contentLength)
+	}
+	assert.Equal(t, "gzip", resp.contentEncoding)
+	assert.Equal(t, "miss", resp.xCache)
+	assert.Equal(t, 1, backendRequests)
+	assert.Less(t, len(resp.body), 1024)
+	assert.Greater(t, len(resp.body), 0)
+}
+
+// TestDontGzipWhenPassAndNoAcceptEncodingGzip checks that clients receive uncompressed responses
+// when we use gzip towards the backend and the backend responding with a compressed response.
+func TestDontGzipWhenPassAndNoAcceptEncodingGzip(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		oneThousandBytes := make([]byte, 1024)
+		w.Header().Set("Cache-Control", "max-age=1")
+		w.WriteHeader(http.StatusOK)
+		w.Write(oneThousandBytes)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container with a custom VCL
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		Vcl: `
+import std;
+sub vcl_pass {
+  set req.http.x-cache = "pass";
+}
+sub vcl_deliver {
+  set resp.http.x-cache = req.http.x-cache;
+}
+sub vcl_backend_fetch {
+  set bereq.http.Accept-Encoding = "gzip";  
+}
+sub vcl_backend_response {
+  set beresp.do_gzip = true;
+}`,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send request which will become a 500 response
+	resp := mkReq(t, port, "foo", withStoreBody(), withMethod(http.MethodPost))
+
+	if resp.transferEncoding == "chunked" {
+		assert.Equal(t, -1, resp.contentLength) // <- because of chunked encoding
+	} else {
+		assert.Equal(t, 1024, resp.contentLength)
+	}
+	assert.Equal(t, "", resp.contentEncoding)
+	assert.Equal(t, "pass", resp.xCache)
+	assert.Equal(t, 1, backendRequests)
+	assert.Equal(t, len(resp.body), 1024)
+}
