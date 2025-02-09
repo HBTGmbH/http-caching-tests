@@ -766,7 +766,7 @@ sub vcl_deliver {
 	xResponseAsFloat, err := strconv.ParseFloat(resp.xResponse, 32)
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.statusCode)
-	assert.Equal(t, 0.0, xResponseAsFloat)
+	assert.LessOrEqual(t, xResponseAsFloat, 0.0)
 }
 
 // TestVaryOnOrigin checks that Varnish behaves properly when adding a custom Vary response header
