@@ -852,7 +852,7 @@ sub vcl_backend_response {
 	defer stopFunc()
 	waitForHealthy(t, port)
 
-	// send request which will become a 500 response
+	// send request with A-E:gzip which will result in Varnish responding with gzip
 	resp := mkReq(t, port, "foo", withStoreBody(), withAcceptEncoding("gzip"))
 
 	if resp.transferEncoding == "chunked" {
@@ -905,7 +905,10 @@ sub vcl_backend_response {
 	defer stopFunc()
 	waitForHealthy(t, port)
 
-	// send request which will become a 500 response
+	// send request without A-E:gzip which will result in Varnish responding with uncompressed
+	// even though we've overwritten A-E in vcl_backend_fetch for a POST
+	// and told Varnish to do gzip compression in vcl_backend_response when the backend
+	// did not respond with gzip.
 	resp := mkReq(t, port, "foo", withStoreBody(), withMethod(http.MethodPost))
 
 	if resp.transferEncoding == "chunked" {
