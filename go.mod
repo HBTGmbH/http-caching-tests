@@ -1,6 +1,6 @@
 module caching
 
-go 1.23.6
+go 1.24
 
 require (
 	github.com/docker/docker v27.5.1+incompatible
