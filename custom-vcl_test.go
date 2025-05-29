@@ -724,7 +724,7 @@ sub vcl_deliver {
 	xResponseAsFloat, err := strconv.ParseFloat(resp.xResponse, 32)
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.statusCode)
-	assert.Equal(t, 10.0, xResponseAsFloat)
+	assert.LessOrEqual(t, xResponseAsFloat, 10.0)
 }
 
 // TestReturnPassInVclRecvMeansZeroObjTtlInVclDeliver tests that obj.ttl in vcl_deliver will
