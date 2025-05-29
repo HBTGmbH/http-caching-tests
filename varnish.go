@@ -15,7 +15,7 @@ import (
 
 var cli *client.Client
 
-const varnishImage = "varnish:7.6.1-alpine"
+const varnishImage = "varnish:7.7.1-alpine"
 
 type VarnishConfig struct {
 	BackendPort  string
