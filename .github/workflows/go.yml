@@ -1,19 +1,19 @@
 name: Go
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
       DOCKER_API_VERSION: 1.43
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.24.2'
-    - name: Test
-      run: go test -parallel 10 -v ./...
+      - uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.5"
+      - name: Test
+        run: go test -parallel 10 -v ./...
