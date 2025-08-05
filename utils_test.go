@@ -24,6 +24,7 @@ type request struct {
 	ifNoneMatch    string
 	acceptEncoding string
 	storeBody      bool
+	storeDate      bool
 	origin         string
 	range_         string
 }
@@ -42,6 +43,7 @@ type response struct {
 	contentEncoding          string
 	contentLength            int
 	accessControlAllowOrigin string
+	date                     string
 }
 
 func mkReq(t *testing.T, port string, xRequest string, modifiers ...func(*request)) response {
@@ -144,6 +146,12 @@ func withStoreBody() func(*request) {
 	}
 }
 
+func withStoreDate() func(*request) {
+	return func(r *request) {
+		r.storeDate = true
+	}
+}
+
 func withAcceptEncoding(acceptEncoding string) func(*request) {
 	return func(r *request) {
 		r.acceptEncoding = acceptEncoding
@@ -225,6 +233,10 @@ func req(t *testing.T, port string, r request) response {
 	if len(resp.TransferEncoding) > 0 {
 		transferEncoding = resp.TransferEncoding[0]
 	}
+	date := ""
+	if r.storeDate {
+		date = resp.Header.Get("Date")
+	}
 	return response{
 		statusCode:               resp.StatusCode,
 		xResponse:                resp.Header.Get("X-Response"),
@@ -239,6 +251,7 @@ func req(t *testing.T, port string, r request) response {
 		transferEncoding:         transferEncoding,
 		acceptRanges:             resp.Header.Get("Accept-Ranges"),
 		accessControlAllowOrigin: resp.Header.Get("Access-Control-Allow-Origin"),
+		date:                     date,
 	}
 }
 

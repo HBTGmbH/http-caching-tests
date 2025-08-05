@@ -982,3 +982,35 @@ func TestRangeRequestIsAlwaysNonRangedForBackend(t *testing.T) {
 	// expect one backend request
 	assert.Equal(t, 1, backendRequests)
 }
+
+// TestDateHeaderInResponseIsCached tests that Varnish will respond
+// with a cached Date header.
+func TestDateHeaderInResponseIsCached(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=100")
+		w.WriteHeader(http.StatusOK)
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send the first request and save the Date header
+	firstDate := mkReq(t, port, "1", withStoreDate()).date
+
+	// wait two seconds
+	time.Sleep(2 * time.Second)
+
+	// send a second request and expect the same Date header
+	assert.Equal(t, firstDate, mkReq(t, port, "1", withStoreDate()).date)
+}
