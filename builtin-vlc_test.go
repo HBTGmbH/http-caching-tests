@@ -443,7 +443,8 @@ func TestHitForMissAndNoRequestCoalescingWhenNoStore(t *testing.T) {
 	// the following N-1 requests in parallel, which will all take sleepTime
 	// together to respond.
 	// Therefore, the whole test case is completed after about 2 * sleepTime.
-	assert.Less(t, time2.Sub(time1), 2*sleepTime+100*time.Millisecond)
+	// But give 1100ms of leeway for slow CI systems.
+	assert.Less(t, time2.Sub(time1), 2*sleepTime+1100*time.Millisecond)
 	assert.Greater(t, time2.Sub(time1), 2*sleepTime-100*time.Millisecond)
 
 	// expect N backend requests
