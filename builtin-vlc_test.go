@@ -3,13 +3,14 @@ package caching_test
 
 import (
 	"caching"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNoCacheControl tests that Varnish will use its default TTL when the backend response
@@ -723,6 +724,52 @@ func TestConditionalRequestWhenRevalidatingWithLastModified(t *testing.T) {
 
 	// expect two backend requests
 	assert.Equal(t, 2, backendRequests)
+}
+
+// TestConditionalRequestWhenBackendRespondsWith200 tests that Varnish will
+// always respond with 304 when the client sends a conditional request
+// with "If-None-Match" that matches the cached item's Etag validator,
+// even when the backend responds with 200 OK for the first Varnish request.
+func TestConditionalRequestWhenBackendRespondsWith200(t *testing.T) {
+	t.Parallel()
+	var backendRequests int
+
+	// start a test server
+	testServerPort, testServer := startTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Response", r.Header.Get("X-Request"))
+		w.Header().Set("Etag", "1234")
+		if backendRequests == 0 {
+			// check that the first request won't be conditional
+			assert.Equal(t, "", r.Header.Get("If-None-Match"))
+			w.WriteHeader(http.StatusOK)
+			// and respond with a body
+			_, err := w.Write([]byte("foo"))
+			assert.NoError(t, err)
+		} else {
+			assert.Fail(t, "unexpected backend request")
+		}
+		backendRequests++
+	})
+	defer testServer.Close()
+
+	// start varnish container
+	port, stopFunc, err := caching.StartVarnishInDocker(caching.VarnishConfig{
+		BackendPort: testServerPort,
+		DefaultTtl:  "1s",
+		DefaultKeep: "5s",
+	})
+	require.NoError(t, err)
+	defer stopFunc()
+	waitForHealthy(t, port)
+
+	// send a conditional request and expect a 304
+	assert.Equal(t,
+		mkResp(http.StatusNotModified, "1", withContentType("text/plain; charset=utf-8")),
+		mkReq(t, port, "1", withIfNoneMatch("1234")),
+	)
+
+	// expect one backend requests
+	assert.Equal(t, 1, backendRequests)
 }
 
 // TestMaxAge0AndNoCacheInRequest tests that Varnish will simply ignore the "Cache-Control: max-age=0, no-cache"
